@@ -1,11 +1,12 @@
 {
   "name": "photodesk",
   "version": "1.0.0",
-  "description": "Photo culling/triage tool for Immich",
+  "description": "Photo review and triage tool for Immich",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
     "dev": "node --watch server.js",
+    "test": "node --test",
     "install-native": "CXXFLAGS=\"-std=c++20\" npm install"
   },
   "engines": {

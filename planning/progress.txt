@@ -54,6 +54,21 @@
   - Storing full asset metadata in scenes JSON column avoids schema migration and enables backward compat
   - OKLCH colors require modern browsers (Chrome 111+, Safari 15.4+, Firefox 113+) — acceptable for self-hosted tool
   - MutationObserver on the grid container auto-attaches hover action event listeners after innerHTML updates
-  - The `data-pid` attribute on grid items enables focus tracking by asset ID (same pattern as design prototype)
-  - Mode renamed from 'triage' to 'cull' to match the design's naming convention
+- The `data-pid` attribute on grid items enables focus tracking by asset ID (same pattern as design prototype)
+- Mode renamed from 'triage' to 'cull' to match the design's naming convention
+---
+
+## 2026-06-08 — Feature #2: Library / Discover Screen
+- Replaced the manual landing form with the high-fidelity Library/Discover screen from the design handoff: sticky translucent wordmark header, Immich connection pill, hero stats, one-row Ready to cull suggestions, calendar heatmap, selection panel, and recent sessions.
+- Added durable discovery backend: processed_assets table, committed/committed_at session state, density_cache, health/stats/density/suggestions/range endpoints, and one cached lightweight Immich asset snapshot shared by all library views.
+- Fixed commit semantics: committed means processed for every asset in the session; sessions are marked committed and processed_assets populated only after zero requested Immich-operation errors.
+- Removed the previous silent 12,500 asset cap from Immich pagination and grouped calendar days using configured TZ/America/New_York semantics.
+- Added node:test coverage for timezone day grouping, exact processed/untriaged counts, suggestion clustering with one-day gaps, and range previews.
+- Verified against local Immich: health connected, 750 IMAGE assets scanned, live suggestion thumbnails rendered, date selection created a Jun 7 session, and a non-destructive all-options-disabled commit marked 2 assets processed.
+- Visual verdict passed at 93/100 for desktop reference fidelity during browser verification.
+- **Learnings:**
+  - Real small batches can have fewer than four preview assets, so the UI repeats available thumbnails to preserve the intended 2×2 mosaic geometry.
+  - Hidden utility styles must override component display rules; otherwise hidden panels can leak into high-fidelity layouts.
+  - Calendar selection should use stable date selectors in automation; element refs become stale as live thumbnails and lazy rendering settle.
+  - Follow-up UX polish: softened product wording from cull/culling/culled to review/reviewing/reviewed on user-facing surfaces, made suggested-batch names editable before session start, and allowed 0–5 rating keys from every workspace pass while keeping the bottom legends uncluttered.
 ---

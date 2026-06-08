@@ -1,4 +1,4 @@
-/* ── PhotoDesk frontend — multi-pass culling ───────────────── */
+/* ── PhotoDesk frontend — multi-pass photo review ───────────── */
 
 // ── SVG Icons ──────────────────────────────────────────────────
 function icon(name, size = 16, strokeW = 1.6) {
@@ -22,7 +22,7 @@ function icon(name, size = 16, strokeW = 1.6) {
 
 // ── Pass definitions ───────────────────────────────────────────
 const PASSES = [
-  { id: 'cull',   label: 'Cull',   icon: 'keep',   hint: 'Keep or reject, fast.' },
+  { id: 'cull',   label: 'Review', icon: 'keep',   hint: 'Keep or reject, fast.' },
   { id: 'rate',   label: 'Rate',   icon: 'star',   hint: 'Star the survivors.' },
   { id: 'stack',  label: 'Stack',  icon: 'stack',  hint: 'Group same-shot variants.' },
   { id: 'commit', label: 'Commit', icon: 'arrowR', hint: 'Push to Immich.' },
@@ -54,6 +54,12 @@ const state = {
 
   // Grid focus
   focusedAssetId: null,
+
+  // Library discovery
+  libraryDays: [],
+  libraryRange: null,
+  libraryDragging: false,
+  immichConnected: false,
 };
 
 // ── DOM shortcuts ──────────────────────────────────────────────
@@ -105,28 +111,262 @@ async function api(method, path, body) {
   return res.json();
 }
 
-// ── HOME SCREEN ────────────────────────────────────────────────
+// ── LIBRARY / DISCOVER ─────────────────────────────────────────
+function thumbnailUrl(assetId) {
+  return `/api/proxy/thumbnail/${encodeURIComponent(assetId)}`;
+}
+
+function heatColor(day) {
+  if (!day || !day.count) return 'var(--panel-2)';
+  const level = day.count >= 60 ? 3 : day.count >= 30 ? 2 : day.count >= 10 ? 1 : 0;
+  return day.untriaged
+    ? ['oklch(0.40 0.10 256)', 'oklch(0.52 0.13 256)', 'oklch(0.62 0.15 256)', 'oklch(0.72 0.15 256)'][level]
+    : ['oklch(0.30 0 0)', 'oklch(0.36 0 0)', 'oklch(0.43 0 0)', 'oklch(0.50 0 0)'][level];
+}
+
+function dateRangeLabel(from, to) {
+  const opts = { month: 'short', day: 'numeric', timeZone: 'UTC' };
+  const first = new Date(`${from}T12:00:00Z`);
+  const last = new Date(`${to}T12:00:00Z`);
+  if (from === to) return first.toLocaleDateString('en-US', opts);
+  if (from.slice(0, 7) === to.slice(0, 7)) {
+    return `${first.toLocaleDateString('en-US', opts)} – ${last.getUTCDate()}`;
+  }
+  return `${first.toLocaleDateString('en-US', opts)} – ${last.toLocaleDateString('en-US', opts)}`;
+}
+
+function setConnectionStatus(health) {
+  const pill = $('immich-status');
+  state.immichConnected = health.immich === 'connected';
+  pill.classList.toggle('connected', state.immichConnected);
+  pill.classList.toggle('disconnected', !state.immichConnected);
+  pill.querySelector('.connection-label').textContent = health.immich;
+}
+
+function renderSuggestions(suggestions) {
+  const grid = $('suggestions-grid');
+  const visibleSuggestions = suggestions.slice(0, 3);
+  if (!visibleSuggestions.length) {
+    grid.innerHTML = '<div class="library-empty">All caught up! No un-triaged batches found.</div>';
+    return;
+  }
+
+  grid.innerHTML = visibleSuggestions.map((suggestion, index) => {
+    const mosaicIds = suggestion.previewAssetIds.length
+      ? Array.from({ length: 4 }, (_, i) => suggestion.previewAssetIds[i % suggestion.previewAssetIds.length])
+      : [];
+    return `
+    <article class="suggestion-card">
+      <div class="suggestion-mosaic">
+        ${mosaicIds.map(id => `
+          <span><img src="${thumbnailUrl(id)}" alt="" loading="lazy" /></span>
+        `).join('')}
+        ${Array.from({ length: Math.max(0, 4 - mosaicIds.length) }, () => '<span></span>').join('')}
+        <div class="untriaged-pill"><i></i>Un-triaged</div>
+      </div>
+      <div class="suggestion-body">
+        <div class="suggestion-title-row">
+          <input
+            class="suggestion-name"
+            type="text"
+            value="${escHtml(suggestion.name)}"
+            aria-label="Session label for ${escHtml(suggestion.name)}"
+            spellcheck="false"
+          />
+          <span class="mono">${escHtml(suggestion.when)}</span>
+        </div>
+        <div class="suggestion-meta mono">
+          <span>${escHtml(dateRangeLabel(suggestion.dateFrom, suggestion.dateTo))}</span>
+          <span>${suggestion.totalPhotos} photos</span>
+          <span>~${suggestion.estimatedScenes} scenes</span>
+        </div>
+        <button class="suggestion-start" data-index="${index}" ${state.immichConnected ? '' : 'disabled'}>
+          Start reviewing ${icon('arrowR', 15)}
+        </button>
+      </div>
+    </article>
+  `;
+  }).join('');
+
+  grid.querySelectorAll('.suggestion-start').forEach(button => {
+    button.addEventListener('click', () => {
+      const suggestion = visibleSuggestions[Number(button.dataset.index)];
+      const label = button.closest('.suggestion-card').querySelector('.suggestion-name').value.trim();
+      createLibrarySession({
+        name: label || suggestion.name,
+        dateFrom: suggestion.dateFrom,
+        dateTo: suggestion.dateTo,
+        sceneThreshold: 30,
+        untriagedOnly: true,
+      }, button);
+    });
+  });
+
+  grid.querySelectorAll('.suggestion-name').forEach(input => {
+    input.addEventListener('keydown', event => {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        input.closest('.suggestion-card').querySelector('.suggestion-start').click();
+      }
+    });
+  });
+}
+
+function monthKeysForDays(days, count = 6) {
+  const latest = days.length ? days.at(-1).date : new Date().toISOString().slice(0, 10);
+  const keys = [];
+  for (let i = count - 1; i >= 0; i--) {
+    const date = new Date(`${latest.slice(0, 7)}-01T12:00:00Z`);
+    date.setUTCMonth(date.getUTCMonth() - i);
+    keys.push(`${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}`);
+  }
+  return keys;
+}
+
+function renderHeatmap(days) {
+  const byDate = new Map(days.map(day => [day.date, day]));
+  const months = monthKeysForDays(days);
+  $('heatmap').innerHTML = months.map(monthKey => {
+    const [year, month] = monthKey.split('-').map(Number);
+    const lastDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
+    const lead = new Date(Date.UTC(year, month - 1, 1)).getUTCDay();
+    const label = new Date(Date.UTC(year, month - 1, 1))
+      .toLocaleDateString('en-US', { month: 'short', timeZone: 'UTC' });
+    const cells = [];
+    for (let i = 0; i < lead; i++) cells.push('<i class="heat-cell empty-offset"></i>');
+    for (let dayNumber = 1; dayNumber <= lastDay; dayNumber++) {
+      const key = `${monthKey}-${String(dayNumber).padStart(2, '0')}`;
+      const day = byDate.get(key) || { date: key, count: 0, untriaged: false, untriagedCount: 0 };
+      cells.push(`<button class="heat-cell" data-date="${key}" data-count="${day.count}" data-untriaged="${day.untriagedCount}" style="background:${heatColor(day)}" aria-label="${key}: ${day.count} photos"></button>`);
+    }
+    return `
+      <div class="heat-month">
+        <div class="heat-month-label">${label} <span class="mono">'${String(year).slice(2)}</span></div>
+        <div class="heat-month-grid">${cells.join('')}</div>
+      </div>
+    `;
+  }).join('');
+
+  $('heatmap').querySelectorAll('.heat-cell[data-date]').forEach(cell => {
+    cell.addEventListener('mousedown', event => {
+      event.preventDefault();
+      state.libraryDragging = true;
+      state.libraryRange = { a: cell.dataset.date, b: cell.dataset.date };
+      updateSelectedCells();
+      loadSelectionPanel();
+    });
+    cell.addEventListener('mouseenter', () => {
+      if (state.libraryDragging) {
+        state.libraryRange.b = cell.dataset.date;
+        updateSelectedCells();
+      }
+      showHeatTooltip(cell);
+    });
+    cell.addEventListener('mouseleave', hideHeatTooltip);
+  });
+}
+
+function updateSelectedCells() {
+  const range = state.libraryRange;
+  if (!range) return;
+  const lo = range.a < range.b ? range.a : range.b;
+  const hi = range.a < range.b ? range.b : range.a;
+  document.querySelectorAll('.heat-cell[data-date]').forEach(cell => {
+    cell.classList.toggle('selected', cell.dataset.date >= lo && cell.dataset.date <= hi);
+  });
+}
+
+function showHeatTooltip(cell) {
+  const tip = $('heatmap-tooltip');
+  const rect = cell.getBoundingClientRect();
+  const count = Number(cell.dataset.count);
+  const untriaged = Number(cell.dataset.untriaged);
+  tip.querySelector('strong').textContent = new Date(`${cell.dataset.date}T12:00:00Z`)
+    .toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' });
+  tip.querySelector('span').textContent = count
+    ? `${count} photos · ${untriaged ? 'un-triaged' : 'reviewed'}`
+    : 'no photos';
+  tip.style.left = `${rect.left + rect.width / 2}px`;
+  tip.style.top = `${rect.top - 10}px`;
+  tip.classList.remove('hidden');
+}
+
+function hideHeatTooltip() {
+  $('heatmap-tooltip').classList.add('hidden');
+}
+
+async function loadSelectionPanel() {
+  if (!state.libraryRange) return;
+  const { a, b } = state.libraryRange;
+  const from = a < b ? a : b;
+  const to = a < b ? b : a;
+  const panel = $('selection-panel');
+  panel.classList.remove('hidden');
+  $('selection-label').textContent = dateRangeLabel(from, to);
+  $('selection-meta').textContent = 'Loading range…';
+
+  try {
+    const summary = await api('GET', `/api/library/range?from=${from}&to=${to}`);
+    if (!state.libraryRange) return;
+    $('selection-meta').innerHTML = `
+      <span>${summary.count} photos</span>
+      <span>${summary.dayCount} ${summary.dayCount === 1 ? 'day' : 'days'}</span>
+      <span class="accent-text">${summary.untriagedCount} un-triaged</span>
+    `;
+    $('selection-name').value = dateRangeLabel(from, to);
+    $('selection-previews').innerHTML = summary.previewAssetIds.map(id => `
+      <span><img src="${thumbnailUrl(id)}" alt="" /></span>
+    `).join('') + (summary.count > summary.previewAssetIds.length
+      ? `<span class="preview-more mono">+${summary.count - summary.previewAssetIds.length}</span>`
+      : '');
+    $('start-selection').disabled = !summary.count || !state.immichConnected;
+    $('start-selection').dataset.from = from;
+    $('start-selection').dataset.to = to;
+  } catch (err) {
+    $('selection-meta').textContent = err.message;
+    $('start-selection').disabled = true;
+  }
+}
+
+async function createLibrarySession(payload, button) {
+  if (!state.immichConnected) return;
+  const original = button.innerHTML;
+  button.disabled = true;
+  button.innerHTML = '<span class="spinner button-spinner"></span> Fetching from Immich…';
+  try {
+    const session = await api('POST', '/api/sessions', payload);
+    await openSession(session.id);
+  } catch (err) {
+    alert(`Failed to create session: ${err.message}`);
+    button.disabled = false;
+    button.innerHTML = original;
+  }
+}
+
 async function loadSessions() {
   const list = $('sessions-list');
   try {
     const sessions = await api('GET', '/api/sessions');
     if (sessions.length === 0) {
-      list.innerHTML = '<p class="muted">No sessions yet. Create one above.</p>';
+      list.innerHTML = '<p class="muted">No sessions yet. Start with a suggested batch or choose dates above.</p>';
       return;
     }
     list.innerHTML = sessions.map(s => `
-      <div class="session-card" data-id="${s.id}">
-        <div class="session-card-name">${escHtml(s.name)}</div>
-        <div class="session-card-meta">
-          <span>${s.total_assets} photos</span>
-          <span>${s.total_scenes} scenes</span>
-          <span>${fmtDate(s.created_at)}</span>
-          ${s.scene_threshold ? `<span>Threshold: ${s.scene_threshold}s</span>` : ''}
+      <div class="recent-session" data-id="${s.id}">
+        <div class="recent-icon ${s.committed ? 'committed' : 'in-progress'}">
+          ${icon(s.committed ? 'check' : 'layers', 16, 1.9)}
         </div>
+        <div class="recent-info">
+          <div>${escHtml(s.name)}</div>
+          <span class="mono">${s.total_assets} photos <i>·</i> ${s.total_scenes} scenes <i>·</i> ${fmtDate(s.created_at)}</span>
+        </div>
+        ${s.committed
+          ? `<div class="recent-counts"><span>${s.kept_count} kept</span><span>${s.rejected_count} cut</span></div>`
+          : '<button class="recent-resume">Resume →</button>'}
       </div>
     `).join('');
 
-    list.querySelectorAll('.session-card').forEach(card => {
+    list.querySelectorAll('.recent-session').forEach(card => {
       card.addEventListener('click', () => openSession(Number(card.dataset.id)));
     });
   } catch (err) {
@@ -134,38 +374,62 @@ async function loadSessions() {
   }
 }
 
-$('scene-threshold').addEventListener('input', function () {
-  $('threshold-display').textContent = this.value;
-});
-
-$('new-session-form').addEventListener('submit', async function (e) {
-  e.preventDefault();
-  const name = $('session-name').value.trim();
-  const dateFrom = $('date-from').value || undefined;
-  const dateTo = $('date-to').value || undefined;
-  const sceneThreshold = Number($('scene-threshold').value);
-
-  if (!name) return;
-
-  const btn = $('create-btn');
-  btn.disabled = true;
-  showLoading('Fetching photos from Immich...');
+async function loadLibrary() {
+  $('library-message').classList.add('hidden');
+  try {
+    const health = await api('GET', '/api/health');
+    setConnectionStatus(health);
+  } catch (err) {
+    setConnectionStatus({ immich: 'disconnected' });
+    const message = $('library-message');
+    message.textContent = `Immich is unavailable: ${err.message}`;
+    message.classList.remove('hidden');
+  }
 
   try {
-    const session = await api('POST', '/api/sessions', {
-      name,
-      dateFrom: dateFrom ? new Date(dateFrom).toISOString() : undefined,
-      dateTo: dateTo ? new Date(dateTo + 'T23:59:59').toISOString() : undefined,
-      sceneThreshold,
-    });
-    hideLoading();
-    await openSession(session.id);
+    const [stats, density, suggestions] = await Promise.all([
+      api('GET', '/api/stats'),
+      api('GET', '/api/library/density'),
+      api('GET', '/api/library/suggestions'),
+    ]);
+    $('stat-library').textContent = stats.totalLibrary.toLocaleString();
+    $('stat-untriaged').textContent = stats.totalUntriaged.toLocaleString();
+    $('stat-days').textContent = stats.activeDays.toLocaleString();
+    state.libraryDays = density.days;
+    renderSuggestions(suggestions);
+    renderHeatmap(density.days);
   } catch (err) {
-    hideLoading();
-    alert(`Failed to create session: ${err.message}`);
-  } finally {
-    btn.disabled = false;
+    $('suggestions-grid').innerHTML = `<div class="library-empty">Unable to scan the library: ${escHtml(err.message)}</div>`;
+    $('heatmap').innerHTML = '<div class="library-empty">Calendar data unavailable.</div>';
   }
+
+  await loadSessions();
+}
+
+window.addEventListener('mouseup', () => {
+  if (state.libraryDragging) {
+    state.libraryDragging = false;
+    loadSelectionPanel();
+  }
+});
+
+$('clear-selection').addEventListener('click', () => {
+  state.libraryRange = null;
+  $('selection-panel').classList.add('hidden');
+  document.querySelectorAll('.heat-cell.selected').forEach(cell => cell.classList.remove('selected'));
+});
+
+$('selection-threshold').addEventListener('input', function () {
+  $('selection-threshold-value').textContent = `${this.value}s`;
+});
+
+$('start-selection').addEventListener('click', function () {
+  createLibrarySession({
+    name: $('selection-name').value.trim() || dateRangeLabel(this.dataset.from, this.dataset.to),
+    dateFrom: this.dataset.from,
+    dateTo: this.dataset.to,
+    sceneThreshold: Number($('selection-threshold').value),
+  }, this);
 });
 
 // ── Open a session ─────────────────────────────────────────────
@@ -177,6 +441,7 @@ async function openSession(sessionId) {
     const sessionData = await api('GET', `/api/sessions/${sessionId}`);
 
     state.currentSession = sessionData;
+    state.currentSession._committed = Boolean(sessionData.committed);
     state.scenes = scenesData.scenes;
     state.decisionMap = scenesData.decisionMap || {};
     state.ratingMap = scenesData.ratingMap || {};
@@ -1094,17 +1359,13 @@ document.addEventListener('keydown', function (e) {
         }
         break;
       case '1': case '2': case '3': case '4': case '5':
-        if (state.mode === 'rate') {
-          e.preventDefault();
-          recordRating(assetId, Number(e.key));
-          lbNavigate(1);
-        }
+        e.preventDefault();
+        recordRating(assetId, Number(e.key));
+        lbNavigate(1);
         break;
       case '0':
-        if (state.mode === 'rate') {
-          e.preventDefault();
-          recordRating(assetId, 0);
-        }
+        e.preventDefault();
+        recordRating(assetId, 0);
         break;
     }
     return;
@@ -1133,6 +1394,17 @@ document.addEventListener('keydown', function (e) {
     return;
   }
 
+  if (k >= '1' && k <= '5') {
+    e.preventDefault();
+    recordRating(focusedId, Number(k));
+    return;
+  }
+  if (k === '0') {
+    e.preventDefault();
+    recordRating(focusedId, 0);
+    return;
+  }
+
   if (state.mode === 'stack') {
     if (k === ' ') {
       e.preventDefault();
@@ -1146,8 +1418,6 @@ document.addEventListener('keydown', function (e) {
   }
 
   if (state.mode === 'rate') {
-    if (k >= '1' && k <= '5') { e.preventDefault(); recordRating(focusedId, Number(k)); return; }
-    if (k === '0') { e.preventDefault(); recordRating(focusedId, 0); return; }
     if (k === 'x' || k === 'X') { e.preventDefault(); recordDecision(focusedId, 'reject'); return; }
     return;
   }
@@ -1171,7 +1441,7 @@ document.addEventListener('keydown', function (e) {
 $('back-to-home').addEventListener('click', () => {
   closeLightbox();
   showScreen('home');
-  loadSessions();
+  loadLibrary();
 });
 
 // ── SUMMARY SCREEN ─────────────────────────────────────────────
@@ -1211,7 +1481,7 @@ function showSummary() {
     $('commit-options').style.display = 'none';
     $('commit-btn').disabled = false;
     $('commit-btn').innerHTML = `Done`;
-    $('commit-btn').onclick = () => { showScreen('home'); loadSessions(); };
+    $('commit-btn').onclick = () => { showScreen('home'); loadLibrary(); };
     $('commit-log').innerHTML = `<div class="commit-log-inner"><div class="commit-log-done">Already committed. Immich is up to date.</div></div>`;
   } else {
     $('commit-options').style.display = '';
@@ -1269,12 +1539,19 @@ $('commit-btn').addEventListener('click', async () => {
       }
     }
 
-    logInner.innerHTML += `<div class="commit-log-done">Done. Immich is up to date.</div>`;
-    $('commit-options').style.display = 'none';
-    state.currentSession._committed = true;
-    $('commit-btn').disabled = false;
-    $('commit-btn').innerHTML = `Done`;
-    $('commit-btn').onclick = () => { showScreen('home'); loadSessions(); };
+    if (result.committed) {
+      logInner.innerHTML += `<div class="commit-log-done">Done. Immich is up to date.</div>`;
+      $('commit-options').style.display = 'none';
+      state.currentSession._committed = true;
+      $('commit-btn').disabled = false;
+      $('commit-btn').innerHTML = `Done`;
+      $('commit-btn').onclick = () => { showScreen('home'); loadLibrary(); };
+    } else {
+      logInner.innerHTML += '<div class="commit-log-line" style="color: var(--reject)">Commit incomplete. Fix the errors above and retry.</div>';
+      $('commit-options').style.display = '';
+      $('commit-btn').disabled = false;
+      $('commit-btn').innerHTML = `Retry ${icon('arrowR', 15)}`;
+    }
 
   } catch (err) {
     logInner.innerHTML += `<div class="commit-log-line" style="color: var(--reject)">${icon('x', 14, 2.4)} Commit failed: ${escHtml(err.message)}</div>`;
@@ -1315,4 +1592,4 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 });
 
-loadSessions();
+loadLibrary();

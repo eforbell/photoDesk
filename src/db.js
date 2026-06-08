@@ -26,7 +26,9 @@ function initSchema(db) {
       immich_url TEXT NOT NULL DEFAULT '',
       date_from TEXT,
       date_to TEXT,
-      scene_threshold INTEGER NOT NULL DEFAULT 30
+      scene_threshold INTEGER NOT NULL DEFAULT 30,
+      committed INTEGER NOT NULL DEFAULT 0,
+      committed_at TEXT
     );
 
     CREATE TABLE IF NOT EXISTS scenes (
@@ -60,7 +62,29 @@ function initSchema(db) {
       asset_ids TEXT NOT NULL,
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
+
+    CREATE TABLE IF NOT EXISTS processed_assets (
+      asset_id TEXT PRIMARY KEY,
+      session_id INTEGER NOT NULL REFERENCES sessions(id),
+      committed_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS density_cache (
+      id INTEGER PRIMARY KEY CHECK (id = 1),
+      computed_at TEXT NOT NULL,
+      data TEXT NOT NULL
+    );
   `);
+
+  const sessionColumns = new Set(
+    db.prepare('PRAGMA table_info(sessions)').all().map(column => column.name)
+  );
+  if (!sessionColumns.has('committed')) {
+    db.exec('ALTER TABLE sessions ADD COLUMN committed INTEGER NOT NULL DEFAULT 0');
+  }
+  if (!sessionColumns.has('committed_at')) {
+    db.exec('ALTER TABLE sessions ADD COLUMN committed_at TEXT');
+  }
 }
 
 module.exports = { getDb };

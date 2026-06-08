@@ -1,6 +1,6 @@
 # PhotoDesk -- Planning
 
-Feature-driven development tracking for PhotoDesk, the photo culling & light-edit tool for Immich.
+Feature-driven development tracking for PhotoDesk, the photo review & light-edit tool for Immich.
 
 ## Structure
 
@@ -13,9 +13,9 @@ Feature-driven development tracking for PhotoDesk, the photo culling & light-edi
 
 | # | Feature | Status |
 |---|---------|--------|
-| 0 | Foundation (Express backend, SQLite, Immich API client, basic culling UI) | shipped |
-| 1 | Visual System + Workspace Redesign | planned |
-| 2 | Library / Discover Screen | planned |
+| 0 | Foundation (Express backend, SQLite, Immich API client, basic review UI) | shipped |
+| 1 | Visual System + Workspace Redesign | shipped |
+| 2 | Library / Discover Screen | shipped |
 | 3 | Editor (Crop + Adjustments + Presets) | planned |
 | 4 | Commit Hardening + Edited Asset Upload | planned |
 
@@ -31,7 +31,7 @@ All design specs live in `design/design_handoff_photodesk/`. The README.md there
 - **Keyboard-first**: Every action has a keyboard shortcut. Mouse is the fallback.
 - **Non-destructive**: Rejects go to Immich trash (recoverable). Edits upload as new stacked variants.
 - **Local state until Commit**: All decisions live in SQLite until the user explicitly pushes.
-- **Three-pass model**: Cull (pick/reject) -> Rate (1-5 stars) -> Stack (manual grouping). Sequential but switchable.
+- **Three-pass model**: Review (pick/reject) -> Rate (1-5 stars) -> Stack (manual grouping). Sequential but switchable.
 
 ## Tech Stack
 

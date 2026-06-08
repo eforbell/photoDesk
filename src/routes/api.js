@@ -1,26 +1,71 @@
 const express = require('express');
 const router = express.Router();
 const { getDb } = require('../db');
-const { fetchAllAssets, getThumbnailBuffer, createStack, trashAssets, updateAssetRating } = require('../immich-client');
+const {
+  fetchAllAssets,
+  getThumbnailBuffer,
+  createStack,
+  trashAssets,
+  updateAssetRating,
+  checkConnection,
+} = require('../immich-client');
 const { clusterByTime } = require('../clustering');
+const {
+  clusterSuggestions,
+  getLibrarySnapshot,
+  invalidateLibraryCache,
+  rangeSummary,
+} = require('../library');
 const config = require('../config');
+
+function localDateBoundary(dateKey, endOfDay = false) {
+  if (!dateKey || !/^\d{4}-\d{2}-\d{2}$/.test(dateKey)) return dateKey;
+  return new Date(`${dateKey}T${endOfDay ? '23:59:59.999' : '00:00:00.000'}`).toISOString();
+}
+
+function sessionAssetIds(db, sessionId) {
+  return db.prepare('SELECT asset_ids FROM scenes WHERE session_id = ? ORDER BY scene_index')
+    .all(sessionId)
+    .flatMap(row => {
+      const values = JSON.parse(row.asset_ids);
+      return values.map(asset => typeof asset === 'string' ? asset : asset.id);
+    });
+}
 
 // GET /api/sessions
 router.get('/sessions', (req, res) => {
   const db = getDb();
-  const sessions = db.prepare('SELECT * FROM sessions ORDER BY created_at DESC').all();
+  const sessions = db.prepare(`
+    SELECT sessions.*,
+      COALESCE(SUM(CASE WHEN decisions.decision = 'pick' THEN 1 ELSE 0 END), 0) AS kept_count,
+      COALESCE(SUM(CASE WHEN decisions.decision = 'reject' THEN 1 ELSE 0 END), 0) AS rejected_count
+    FROM sessions
+    LEFT JOIN decisions ON decisions.session_id = sessions.id
+    GROUP BY sessions.id
+    ORDER BY sessions.created_at DESC
+  `).all();
   res.json(sessions);
 });
 
 // POST /api/sessions
 router.post('/sessions', async (req, res) => {
   try {
-    const { name, dateFrom, dateTo, sceneThreshold = 30 } = req.body;
+    const { name, dateFrom, dateTo, sceneThreshold = 30, untriagedOnly = false } = req.body;
 
     if (!name) return res.status(400).json({ error: 'name is required' });
 
     // Fetch all assets from Immich
-    const assets = await fetchAllAssets({ dateFrom, dateTo });
+    let assets = await fetchAllAssets({
+      dateFrom: localDateBoundary(dateFrom),
+      dateTo: localDateBoundary(dateTo, true),
+    });
+    if (untriagedOnly) {
+      const db = getDb();
+      const processed = new Set(
+        db.prepare('SELECT asset_id FROM processed_assets').all().map(row => row.asset_id)
+      );
+      assets = assets.filter(asset => !processed.has(asset.id));
+    }
 
     if (assets.length === 0) {
       return res.status(400).json({ error: 'No assets found for the given date range' });
@@ -76,6 +121,85 @@ router.post('/sessions', async (req, res) => {
   } catch (err) {
     console.error('[POST /sessions]', err);
     res.status(500).json({ error: err.message });
+  }
+});
+
+router.get('/health', async (req, res) => {
+  const apiKeySet = Boolean(config.immichApiKey);
+  if (!apiKeySet) {
+    return res.json({ immich: 'disconnected', apiKeySet: false });
+  }
+  try {
+    await checkConnection();
+    res.json({ immich: 'connected', apiKeySet: true });
+  } catch (err) {
+    res.status(503).json({
+      immich: 'disconnected',
+      apiKeySet: true,
+      error: err.message,
+    });
+  }
+});
+
+router.get('/stats', async (req, res) => {
+  try {
+    const db = getDb();
+    const snapshot = await getLibrarySnapshot(db, { refresh: req.query.refresh === 'true' });
+    res.json({
+      totalLibrary: snapshot.totalLibrary,
+      totalProcessed: snapshot.totalProcessed,
+      totalUntriaged: snapshot.totalUntriaged,
+      activeDays: snapshot.activeDays,
+      computedAt: snapshot.computedAt,
+      timezone: snapshot.timezone,
+    });
+  } catch (err) {
+    console.error('[GET /stats]', err);
+    res.status(502).json({ error: err.message });
+  }
+});
+
+router.get('/library/density', async (req, res) => {
+  try {
+    const db = getDb();
+    const snapshot = await getLibrarySnapshot(db, { refresh: req.query.refresh === 'true' });
+    res.json({
+      computedAt: snapshot.computedAt,
+      timezone: snapshot.timezone,
+      days: snapshot.days.map(day => ({
+        date: day.date,
+        count: day.count,
+        untriaged: day.untriagedCount > 0,
+        untriagedCount: day.untriagedCount,
+      })),
+    });
+  } catch (err) {
+    console.error('[GET /library/density]', err);
+    res.status(502).json({ error: err.message });
+  }
+});
+
+router.get('/library/suggestions', async (req, res) => {
+  try {
+    const db = getDb();
+    const snapshot = await getLibrarySnapshot(db);
+    res.json(clusterSuggestions(snapshot));
+  } catch (err) {
+    console.error('[GET /library/suggestions]', err);
+    res.status(502).json({ error: err.message });
+  }
+});
+
+router.get('/library/range', async (req, res) => {
+  const { from, to } = req.query;
+  if (!from || !to) return res.status(400).json({ error: 'from and to are required' });
+  try {
+    const db = getDb();
+    const snapshot = await getLibrarySnapshot(db);
+    res.json(rangeSummary(snapshot, from, to));
+  } catch (err) {
+    console.error('[GET /library/range]', err);
+    res.status(502).json({ error: err.message });
   }
 });
 
@@ -273,6 +397,16 @@ router.post('/sessions/:id/commit', async (req, res) => {
 
   const session = db.prepare('SELECT * FROM sessions WHERE id = ?').get(sessionId);
   if (!session) return res.status(404).json({ error: 'Session not found' });
+  if (session.committed) {
+    return res.json({
+      assetsTrashed: 0,
+      ratingsWritten: 0,
+      stacksCreated: 0,
+      errors: [],
+      committed: true,
+      alreadyCommitted: true,
+    });
+  }
 
   const { trashRejects = true, writeRatings = true, createStacks = true } = req.body || {};
 
@@ -323,6 +457,28 @@ router.post('/sessions/:id/commit', async (req, res) => {
         results.errors.push(`Stack creation failed: ${err.message}`);
       }
     }
+  }
+
+  if (results.errors.length === 0) {
+    const assetIds = sessionAssetIds(db, sessionId);
+    const markCommitted = db.transaction(() => {
+      const insertProcessed = db.prepare(`
+        INSERT OR IGNORE INTO processed_assets (asset_id, session_id)
+        VALUES (?, ?)
+      `);
+      for (const assetId of assetIds) insertProcessed.run(assetId, sessionId);
+      db.prepare(`
+        UPDATE sessions
+        SET committed = 1, committed_at = datetime('now')
+        WHERE id = ?
+      `).run(sessionId);
+      invalidateLibraryCache(db);
+    });
+    markCommitted();
+    results.committed = true;
+    results.assetsProcessed = assetIds.length;
+  } else {
+    results.committed = false;
   }
 
   res.json(results);

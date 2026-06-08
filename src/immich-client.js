@@ -44,11 +44,14 @@ async function fetchAllAssets({ dateFrom, dateTo } = {}) {
     if (!data.assets.nextPage) break;
     page++;
 
-    // Safety cap at 50 pages (12,500 assets)
-    if (page > 50) break;
   }
 
   return allAssets;
+}
+
+async function checkConnection() {
+  await searchAssets({ page: 1, size: 1 });
+  return true;
 }
 
 async function getThumbnailBuffer(assetId) {
@@ -119,4 +122,11 @@ async function updateAssetRating(assetId, rating) {
   return res.json();
 }
 
-module.exports = { fetchAllAssets, getThumbnailBuffer, createStack, trashAssets, updateAssetRating };
+module.exports = {
+  fetchAllAssets,
+  getThumbnailBuffer,
+  createStack,
+  trashAssets,
+  updateAssetRating,
+  checkConnection,
+};

@@ -11,50 +11,106 @@
 </head>
 <body>
 
-  <!-- HOME SCREEN -->
+  <!-- LIBRARY / DISCOVER SCREEN -->
   <div id="screen-home" class="screen active">
-    <header class="app-header">
-      <h1 class="app-title">PhotoDesk</h1>
-      <p class="app-subtitle">Photo culling for Immich</p>
+    <header class="library-header">
+      <div class="wordmark">
+        <span class="wordmark-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 3l9 5-9 5-9-5 9-5z"/><path d="M3 13l9 5 9-5"/>
+          </svg>
+        </span>
+        <span>Photo<span>Desk</span></span>
+      </div>
+      <div id="immich-status" class="connection-pill">
+        <span class="connection-dot"></span>
+        Immich · <span class="mono connection-label">checking</span>
+      </div>
     </header>
 
-    <main class="home-main">
-      <section class="new-session-panel">
-        <h2>New Session</h2>
-        <form id="new-session-form">
-          <div class="form-row">
-            <label for="session-name">Session name</label>
-            <input type="text" id="session-name" placeholder="e.g. Weekend Trip" required />
-          </div>
-          <div class="form-row form-row-cols">
-            <div>
-              <label for="date-from">From</label>
-              <input type="date" id="date-from" />
-            </div>
-            <div>
-              <label for="date-to">To</label>
-              <input type="date" id="date-to" />
-            </div>
-          </div>
-          <div class="form-row">
-            <label for="scene-threshold">
-              Scene threshold: <span id="threshold-display">30</span>s
-            </label>
-            <input type="range" id="scene-threshold" min="5" max="300" value="30" step="5" />
-          </div>
-          <button type="submit" class="btn btn-primary" id="create-btn">
-            Fetch &amp; Start Session
-          </button>
-        </form>
+    <main class="library-main">
+      <div class="library-hero">
+        <div>
+          <h1>Your library</h1>
+          <p>PhotoDesk scans Immich for photos you haven't reviewed yet and groups them into sessions. Start with a suggestion, or browse the calendar.</p>
+        </div>
+        <div class="library-stats">
+          <div class="library-stat"><strong id="stat-library" class="mono">—</strong><span>In library</span></div>
+          <div class="library-stat"><strong id="stat-untriaged" class="mono accent-text">—</strong><span>Un-triaged</span></div>
+          <div class="library-stat"><strong id="stat-days" class="mono">—</strong><span>Active days</span></div>
+        </div>
+      </div>
+
+      <div id="library-message" class="library-message hidden"></div>
+
+      <section class="library-section">
+        <div class="section-head">
+          <h2>Ready to review</h2>
+          <span>Un-triaged batches, newest first</span>
+        </div>
+        <div id="suggestions-grid" class="suggestions-grid">
+          <div class="library-loading"><span class="spinner"></span> Scanning Immich…</div>
+        </div>
       </section>
 
-      <section class="sessions-list-panel">
-        <h2>Past Sessions</h2>
-        <div id="sessions-list">
-          <p class="muted">Loading sessions...</p>
+      <section class="library-section">
+        <div class="section-head">
+          <h2>Browse by date</h2>
+          <span>Click a day or drag across several · brighter = more photos</span>
+        </div>
+        <div class="heatmap-card">
+          <div id="heatmap" class="heatmap"></div>
+          <div class="heatmap-legend">
+            <span><i class="legend-cell needs-review"></i>Needs review</span>
+            <span><i class="legend-cell reviewed"></i>Reviewed</span>
+            <span class="heat-ramp">Less
+              <i style="background:var(--panel-2)"></i>
+              <i style="background:oklch(0.40 0.10 256)"></i>
+              <i style="background:oklch(0.52 0.13 256)"></i>
+              <i style="background:oklch(0.62 0.15 256)"></i>
+              <i style="background:oklch(0.72 0.15 256)"></i>
+              More
+            </span>
+          </div>
+        </div>
+        <div id="selection-panel" class="selection-panel hidden">
+          <div class="selection-summary">
+            <div>
+              <strong id="selection-label"></strong>
+              <div id="selection-meta" class="mono"></div>
+            </div>
+            <button id="clear-selection" class="icon-button" aria-label="Clear date selection">×</button>
+          </div>
+          <div id="selection-previews" class="selection-previews"></div>
+          <div class="selection-controls">
+            <label class="selection-name">
+              <span>Session name</span>
+              <input id="selection-name" type="text" />
+            </label>
+            <label class="selection-threshold">
+              <span>Scene gap <b id="selection-threshold-value" class="mono">30s</b></span>
+              <input id="selection-threshold" type="range" min="5" max="120" value="30" step="5" />
+            </label>
+            <button id="start-selection" class="btn btn-primary">Start session →</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="library-section recent-section">
+        <div class="section-head">
+          <h2>Recent sessions</h2>
+          <span>Pick up where you left off</span>
+        </div>
+        <div id="sessions-list" class="recent-sessions">
+          <p class="muted">Loading sessions…</p>
         </div>
       </section>
     </main>
+
+    <div id="heatmap-tooltip" class="heatmap-tooltip hidden">
+      <strong></strong>
+      <span class="mono"></span>
+    </div>
   </div>
 
   <!-- REVIEW SCREEN -->

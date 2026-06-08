@@ -47,7 +47,7 @@
       "title": "Topbar and ProgressRail",
       "acceptanceCriteria": [
         "Replace the flat mode-tab buttons with the ProgressRail component from the design",
-        "Rail layout: Cull -> Rate -> Stack -> Commit as a connected horizontal sequence with connector lines",
+        "Rail layout: Review -> Rate -> Stack -> Commit as a connected horizontal sequence with connector lines",
         "Each step: circular status indicator (accent when active, green check when prior pass done), label, live count chip",
         "Connector lines fill with accent color as you progress through passes",
         "Clicking any step switches to that pass (same as current tab behavior)",
@@ -85,7 +85,7 @@
         "Star ratings: gold stars (--star color) shown at bottom of thumbnail over a subtle gradient",
         "Stack mode: checkbox replaces status badge top-left (accent when selected, translucent dark when not)",
         "Stack group badge: accent-colored link icon + group number badge top-right",
-        "Hover state: reveal quick-action buttons (keep/reject in Cull mode, maximize always) over a bottom gradient",
+        "Hover state: reveal quick-action buttons (keep/reject in Review mode, maximize always) over a bottom gradient",
         "Reject thumbnails dim to 40% opacity in Stack mode",
         "Existing pick/reject/star/stack visual indicators all update to use new token colors"
       ],
@@ -98,11 +98,11 @@
       "title": "Pass hint strip and keyboard legend",
       "acceptanceCriteria": [
         "Below the topbar, a centered one-line hint for the current pass with an icon",
-        "Cull: checkmark icon + 'Keep or reject, fast.'",
+        "Review: checkmark icon + 'Keep or reject, fast.'",
         "Rate: star icon + 'Star the survivors.'",
         "Stack: layers icon + 'Group same-shot variants.'",
         "Bottom of screen: sticky keyboard shortcut legend bar, content changes per pass",
-        "Cull: P Keep · X Reject · U Unset · ←→ Move · ↵ Open · E Edit",
+        "Review: P Keep · X Reject · U Unset · ←→ Move · ↵ Open · E Edit",
         "Rate: 1-5 Rate · 0 Clear · X Reject · ←→ Move · ↵ Open · E Edit",
         "Stack: Space/click Select · G Group · ←→ Move · ↵ Open",
         "In lightbox: legend updates to show lightbox-specific shortcuts (Enter = next scene, Shift+Enter = prev scene, Esc = close)",
@@ -155,13 +155,14 @@
         "Auto-scroll: grid scrolls to keep focused thumbnail visible (with 70px top padding, 20px bottom padding)",
         "Enter or O opens the lightbox on the focused thumbnail",
         "E opens the editor on the focused thumbnail (placeholder for Phase 3)",
-        "Pass-specific keys work on the focused thumbnail: P/X/U in Cull, 1-5/0/X in Rate, Space to toggle selection in Stack",
+        "Pass-specific keys work on the focused thumbnail: P/X/U in Review, 1-5/0/X in Rate, Space to toggle selection in Stack",
+        "Rating keys 1-5 and 0 remain available in every pass, including Review and Stack, without adding them to each pass's bottom legend",
         "G in Stack mode groups current selection (same as Group as Stack button)",
         "Focus persists when switching passes (stays on the same photo if still visible)"
       ],
       "priority": 8,
       "passes": true,
-      "notes": "This enables full keyboard-only culling from the grid without ever opening the lightbox. Reference shell.jsx keyboard handler. The grid needs data-pid attributes on thumbnails for focus tracking."
+      "notes": "This enables full keyboard-only review from the grid without ever opening the lightbox. Reference shell.jsx keyboard handler. The grid needs data-pid attributes on thumbnails for focus tracking."
     },
     {
       "id": "VW-009",
