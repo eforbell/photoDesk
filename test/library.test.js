@@ -7,6 +7,10 @@ const {
   formatDateRange,
   rangeSummary,
 } = require('../src/library');
+const {
+  monthKeysForYear,
+  yearsForDays,
+} = require('../public/calendar');
 
 function asset(id, fileCreatedAt) {
   return { id, fileCreatedAt, exifInfo: { exifImageWidth: 4000, exifImageHeight: 3000 } };
@@ -60,4 +64,21 @@ test('range summaries include both endpoints and preview IDs', () => {
   assert.equal(summary.untriagedCount, 2);
   assert.deepEqual(summary.previewAssetIds, ['a', 'b', 'c']);
   assert.equal(formatDateRange('2026-06-01', '2026-06-03'), 'Jun 1–3');
+});
+
+test('calendar navigation exposes the full library year range', () => {
+  const days = [
+    { date: '2000-09-12' },
+    { date: '2003-04-02' },
+    { date: '2026-06-08' },
+  ];
+
+  assert.deepEqual(yearsForDays(days), [2000, 2003, 2026]);
+  assert.deepEqual(monthKeysForYear(days, 2000), [
+    '2000-09', '2000-10', '2000-11', '2000-12',
+  ]);
+  assert.equal(monthKeysForYear(days, 2003).length, 12);
+  assert.deepEqual(monthKeysForYear(days, 2026), [
+    '2026-01', '2026-02', '2026-03', '2026-04', '2026-05', '2026-06',
+  ]);
 });

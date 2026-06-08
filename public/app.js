@@ -57,6 +57,7 @@ const state = {
 
   // Library discovery
   libraryDays: [],
+  libraryYear: null,
   libraryRange: null,
   libraryDragging: false,
   immichConnected: false,
@@ -212,20 +213,44 @@ function renderSuggestions(suggestions) {
   });
 }
 
-function monthKeysForDays(days, count = 6) {
-  const latest = days.length ? days.at(-1).date : new Date().toISOString().slice(0, 10);
-  const keys = [];
-  for (let i = count - 1; i >= 0; i--) {
-    const date = new Date(`${latest.slice(0, 7)}-01T12:00:00Z`);
-    date.setUTCMonth(date.getUTCMonth() - i);
-    keys.push(`${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}`);
+function renderHeatmapYearNav(days) {
+  const years = PhotoDeskCalendar.yearsForDays(days);
+  const select = $('heatmap-year');
+  const previous = $('heatmap-prev-year');
+  const next = $('heatmap-next-year');
+
+  if (!years.length) {
+    state.libraryYear = null;
+    select.innerHTML = '';
+    select.disabled = true;
+    previous.disabled = true;
+    next.disabled = true;
+    $('heatmap-range').textContent = '';
+    return;
   }
-  return keys;
+
+  if (!years.includes(state.libraryYear)) state.libraryYear = years.at(-1);
+  select.innerHTML = years
+    .slice()
+    .reverse()
+    .map(year => `<option value="${year}" ${year === state.libraryYear ? 'selected' : ''}>${year}</option>`)
+    .join('');
+  select.disabled = false;
+
+  const index = years.indexOf(state.libraryYear);
+  previous.disabled = index <= 0;
+  next.disabled = index >= years.length - 1;
+  previous.dataset.year = index > 0 ? years[index - 1] : '';
+  next.dataset.year = index < years.length - 1 ? years[index + 1] : '';
+  $('heatmap-range').textContent = years.length > 1
+    ? `${years[0]}–${years.at(-1)} available`
+    : `${years[0]} available`;
 }
 
 function renderHeatmap(days) {
   const byDate = new Map(days.map(day => [day.date, day]));
-  const months = monthKeysForDays(days);
+  renderHeatmapYearNav(days);
+  const months = PhotoDeskCalendar.monthKeysForYear(days, state.libraryYear);
   $('heatmap').innerHTML = months.map(monthKey => {
     const [year, month] = monthKey.split('-').map(Number);
     const lastDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
@@ -406,6 +431,31 @@ async function loadLibrary() {
   await loadSessions();
 }
 
+function clearLibraryDateSelection() {
+  state.libraryRange = null;
+  $('selection-panel').classList.add('hidden');
+  document.querySelectorAll('.heat-cell.selected').forEach(cell => cell.classList.remove('selected'));
+}
+
+function showLibraryYear(year) {
+  if (!Number.isInteger(year) || year === state.libraryYear) return;
+  state.libraryYear = year;
+  clearLibraryDateSelection();
+  renderHeatmap(state.libraryDays);
+}
+
+$('heatmap-year').addEventListener('change', function () {
+  showLibraryYear(Number(this.value));
+});
+
+$('heatmap-prev-year').addEventListener('click', function () {
+  showLibraryYear(Number(this.dataset.year));
+});
+
+$('heatmap-next-year').addEventListener('click', function () {
+  showLibraryYear(Number(this.dataset.year));
+});
+
 window.addEventListener('mouseup', () => {
   if (state.libraryDragging) {
     state.libraryDragging = false;
@@ -414,9 +464,7 @@ window.addEventListener('mouseup', () => {
 });
 
 $('clear-selection').addEventListener('click', () => {
-  state.libraryRange = null;
-  $('selection-panel').classList.add('hidden');
-  document.querySelectorAll('.heat-cell.selected').forEach(cell => cell.classList.remove('selected'));
+  clearLibraryDateSelection();
 });
 
 $('selection-threshold').addEventListener('input', function () {

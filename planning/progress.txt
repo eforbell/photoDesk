@@ -86,3 +86,12 @@
   - Baseline adoption needs a follow-up idempotent index migration so legacy databases and fresh databases converge on the same physical schema.
   - Runtime data paths and deployment checkout paths should be independently configurable before edited render files are introduced.
 ---
+
+## 2026-06-08 — Full-history Calendar Navigation
+- Replaced the latest-six-month-only heatmap window with active-year navigation and a year selector covering the complete Immich library history.
+- Kept the current partial year compact, while completed years render all twelve months with the existing wrapping heatmap layout.
+- Added regression coverage for libraries spanning 2000 through 2026 and verified desktop plus 390px rendering in a real browser.
+- **Learnings:**
+  - The density API already returned the full timeline; the apparent cutoff was a presentation limit in `monthKeysForDays`.
+  - Large real libraries need explicit temporal navigation rather than silently applying a design-mock window.
+---

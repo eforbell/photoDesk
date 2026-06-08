@@ -59,6 +59,17 @@
           <span>Click a day or drag across several · brighter = more photos</span>
         </div>
         <div class="heatmap-card">
+          <div class="heatmap-toolbar">
+            <div class="heatmap-year-nav">
+              <button id="heatmap-prev-year" class="heatmap-year-button" aria-label="Previous year">‹</button>
+              <label class="heatmap-year-select">
+                <span class="sr-only">Calendar year</span>
+                <select id="heatmap-year" aria-label="Calendar year"></select>
+              </label>
+              <button id="heatmap-next-year" class="heatmap-year-button" aria-label="Next year">›</button>
+            </div>
+            <span id="heatmap-range" class="heatmap-range mono"></span>
+          </div>
           <div id="heatmap" class="heatmap"></div>
           <div class="heatmap-legend">
             <span><i class="legend-cell needs-review"></i>Needs review</span>
@@ -283,6 +294,7 @@
     <p id="loading-msg">Loading...</p>
   </div>
 
+  <script src="calendar.js"></script>
   <script src="app.js"></script>
 </body>
 </html>
