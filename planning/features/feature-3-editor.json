@@ -1,38 +1,172 @@
 {
   "branchName": "feature/3-editor",
   "projectName": "PhotoDesk",
-  "description": "Add a non-destructive photo editor accessible from the lightbox. Supports crop (with aspect ratio presets and rule-of-thirds overlay), adjustment sliders (exposure, contrast, highlights, shadows, temp, saturation, vibrance, vignette), and preset filters (Punch, Warm, Cool, Matte, B&W, Film). Edits preview live via CSS filters in the browser. On save, the backend renders the final image using sharp (libvips) and stores the edit parameters locally. On commit, edited versions are uploaded to Immich as new assets and stacked with their originals.",
+  "status": "planned",
+  "detailLevel": "actionable after Feature 1 and Feature 2 learnings",
+  "description": "Add a humble, non-destructive photo editor accessible from the review grid and lightbox. It supports crop, core adjustments, and presets with a live browser preview, server-side rendering, local edit persistence, thumbnail/lightbox badges, and commit-time upload/stacking into Immich as edited versions. The editor must keep the existing Review -> Rate -> Stack -> Commit workflow fast and visually consistent with the design handoff.",
   "designReference": "design/design_handoff_photodesk/lightbox.jsx (Editor, Stage, Histogram), design/design_handoff_photodesk/components.jsx (adjCss, tempOverlay, vignetteOverlay, ADJ_ZERO, PRESETS), design/design_handoff_photodesk/README.md Section 4 (Editor).",
   "principles": [
-    "Non-destructive: original is always preserved. Edits save as new versions stacked over originals.",
-    "Live preview: all adjustments render in real-time via CSS filters before committing to server-side rendering.",
-    "CSS-to-sharp parity: the browser CSS preview must closely match the sharp-rendered output. Document any known divergences.",
-    "Humble scope: this is not Lightroom. Exposure/contrast/crop/presets cover 90% of phone photo fixes."
+    "Non-destructive: originals are never mutated. Saved edits become local pending versions and upload to Immich as stacked variants only on explicit Commit.",
+    "Keep Review language user-facing. Internal code can keep historical cull names when too invasive, but UI copy should say Review/reviewed.",
+    "Live preview first: adjustment/crop interactions must feel instant in the browser; server rendering happens on Save.",
+    "CSS-to-sharp parity: saved output should closely match preview. Known divergences must be documented and tested with fixtures.",
+    "Humble scope: not Lightroom. Exposure/contrast/crop/presets cover common phone-photo fixes without slowing the review flow.",
+    "Desktop-first with guarded mobile: optimize the full editor for desktop, but preserve tap access to Save/Cancel/Commit paths at narrow widths and iOS web-app scale.",
+    "No visual drift: use the existing dark-only tokens, Hanken Grotesk/JetBrains Mono, blue/green/red semantics, 1px borders, and rounded controls from the shipped app."
   ],
+  "schemaPlan": {
+    "migration": "003-editor-state.sql",
+    "snapshot": "Update db/schema.sql in the same commit.",
+    "table": "edits",
+    "columns": [
+      "id INTEGER PRIMARY KEY AUTOINCREMENT",
+      "session_id INTEGER NOT NULL REFERENCES sessions(id) ON DELETE CASCADE",
+      "asset_id TEXT NOT NULL",
+      "adjustments TEXT NOT NULL DEFAULT '{}'",
+      "crop TEXT NOT NULL DEFAULT '{}'",
+      "rendered_path TEXT",
+      "render_status TEXT NOT NULL DEFAULT 'pending' CHECK(render_status IN ('pending','rendering','ready','failed','uploaded'))",
+      "render_error TEXT",
+      "immich_asset_id TEXT",
+      "created_at TEXT NOT NULL DEFAULT (datetime('now'))",
+      "updated_at TEXT NOT NULL DEFAULT (datetime('now'))",
+      "UNIQUE(session_id, asset_id)"
+    ],
+    "indexes": [
+      "idx_edits_session ON edits(session_id)",
+      "idx_edits_status ON edits(render_status)"
+    ],
+    "storage": "Rendered files live under PHOTODESK_EDIT_DIR when set; otherwise a local ignored directory such as ./var/edits. The DB stores paths plus render/upload status for retry safety."
+  },
   "stories": [
-    "ED-001: Editor panel UI — split layout (preview left, controls right 320px), crop/adjust tab toggle, preset pill row",
-    "ED-002: Adjustment sliders — 8 sliders grouped into Light/Color/Effects, -100 to 100 range (vignette 0-100), double-click label resets to 0",
-    "ED-003: Live CSS preview engine — port adjCss/tempOverlay/vignetteOverlay from components.jsx to vanilla JS, apply as filter + overlay divs on the Stage image",
-    "ED-004: Preset system — Original/Punch/Warm/Cool/Matte/B&W/Film, each sets an adjustment bundle, clicking applies instantly",
-    "ED-005: Crop UI — aspect ratio grid (Original/1:1/4:5/5:4/3:2/2:3/16:9), rule-of-thirds overlay, live aspect ratio change on the preview",
-    "ED-006: Decorative histogram — SVG, shifts with exposure, uses photo seed for deterministic shape (nice-to-have, can simplify)",
-    "ED-007: Backend sharp rendering — new POST /api/edits/render endpoint, accepts asset ID + adjustment params + crop, fetches original from Immich, renders via sharp, returns the processed image buffer",
-    "ED-008: Edit state persistence — new edits table in SQLite (session_id, asset_id, adjustments JSON, crop JSON, rendered_path, created_at). Save stores params + rendered file locally.",
-    "ED-009: Toast and badge integration — 'Saved as new version · original preserved' toast on save, EDITED badge on thumbnails in grid and filmstrip",
-    "ED-010: Commit integration — on commit with 'Upload edited versions' checked, upload each rendered file to Immich via POST /api/assets (multipart), then POST /api/stacks to stack edited over original"
+    {
+      "id": "ED-001",
+      "title": "Editor entry points and shell",
+      "priority": "p0",
+      "summary": "Open the editor from lightbox and from an image card without losing the user's current review context.",
+      "acceptanceCriteria": [
+        "Every kept/reviewed asset can open an editor panel or overlay from the grid/lightbox.",
+        "Closing returns to the same scene, selection, stage, filter, and scroll position.",
+        "The existing stage header remains usable; editor entry does not hide the path to Commit on narrow screens.",
+        "The shell matches shipped typography, borders, dark surface, and control sizing."
+      ]
+    },
+    {
+      "id": "ED-002",
+      "title": "Adjustment model and always-available rating",
+      "priority": "p0",
+      "summary": "Add the adjustment state model while preserving the Feature 2 learning that star rating should always be available, not only in Rate mode.",
+      "acceptanceCriteria": [
+        "Adjustment state starts from ADJ_ZERO and supports exposure, contrast, highlights, shadows, temp, saturation, vibrance, and vignette.",
+        "Controls use -100..100 except vignette 0..100; reset affordance restores individual sliders to zero.",
+        "Star rating remains available in Review/lightbox/editor contexts via taps/clicks and keyboard 1-5.",
+        "Saved ratings and edit states are independent: rating changes do not dirty edit state."
+      ]
+    },
+    {
+      "id": "ED-003",
+      "title": "Live CSS preview and presets",
+      "priority": "p0",
+      "summary": "Port the prototype preview engine to vanilla JS with original, punch, warm, cool, matte, black-and-white, and film presets.",
+      "acceptanceCriteria": [
+        "Preview updates without a network roundtrip while sliders or preset pills change.",
+        "Preset selection applies a complete adjustment bundle immediately and remains editable afterward.",
+        "Temperature/vignette overlays are visually close to the design prototype and do not block pointer interactions.",
+        "Original preset restores ADJ_ZERO."
+      ]
+    },
+    {
+      "id": "ED-004",
+      "title": "Crop UI",
+      "priority": "p1",
+      "summary": "Support non-destructive crop with common aspect ratios and a rule-of-thirds overlay.",
+      "acceptanceCriteria": [
+        "Aspect choices include Original, 1:1, 4:5, 5:4, 3:2, 2:3, and 16:9.",
+        "The crop overlay is visible against bright/dark photos and follows current design tokens.",
+        "Crop coordinates are stored normalized so preview and server rendering are resolution-independent.",
+        "On narrow screens, crop handles remain touchable and Save/Cancel remains visible without rotating the device."
+      ]
+    },
+    {
+      "id": "ED-005",
+      "title": "Server render pipeline",
+      "priority": "p0",
+      "summary": "Render saved edits with sharp from the Immich original and persist the output locally for commit/retry.",
+      "acceptanceCriteria": [
+        "A save endpoint fetches the source asset from Immich server-side, renders with sharp, stores the file, and records edit metadata/status.",
+        "HEIC/iPhone originals are detected; unsupported libvips/HEIC capability returns a clear app error instead of corrupt output.",
+        "Render failure leaves the previous ready edit intact when one exists and records render_error for visibility/retry.",
+        "Rendered file writes are atomic: temporary path first, then rename into final location."
+      ]
+    },
+    {
+      "id": "ED-006",
+      "title": "Edit persistence and badges",
+      "priority": "p0",
+      "summary": "Persist edit state per session/asset and show edited state everywhere a user makes review decisions.",
+      "acceptanceCriteria": [
+        "Reloading a session restores saved edits, badges, and adjustment/crop values.",
+        "Grid cards, lightbox filmstrip, and image stage show a compact EDITED badge using existing blue accent styling.",
+        "Changing a saved edit returns status to pending/rendering/ready as appropriate without creating duplicate rows.",
+        "Session labels added during Feature 2 remain unchanged by editor state."
+      ]
+    },
+    {
+      "id": "ED-007",
+      "title": "Commit integration for edited versions",
+      "priority": "p0",
+      "summary": "Upload ready edited files to Immich on Commit and stack them with originals without breaking the existing reviewed/processed semantics.",
+      "acceptanceCriteria": [
+        "Commit summary clearly states how many edited versions will upload in addition to reject/rating/stack actions.",
+        "Edited upload is opt-in if the design keeps a checkbox, otherwise explicit in the Commit confirmation copy.",
+        "Successful edited upload stores immich_asset_id and marks the edit uploaded, making retry idempotent enough to avoid duplicate uploads when possible.",
+        "A failed upload does not mark the session committed/processed; the user can retry after fixing the error.",
+        "After successful commit, local discovery/library caches are invalidated so newly uploaded edited assets do not appear as unreviewed originals."
+      ]
+    },
+    {
+      "id": "ED-008",
+      "title": "Visual and mobile resilience",
+      "priority": "p1",
+      "summary": "Preserve the desktop design while avoiding the narrow-header failure discovered during Feature 2 manual testing.",
+      "acceptanceCriteria": [
+        "At desktop widths, the editor uses the prototype split layout: preview first, controls in a fixed-width right rail around 320px.",
+        "At approximately <=700px, the editor becomes a stacked/fullscreen layout with controls reachable by tabs/drawer and persistent Save/Cancel actions.",
+        "Text inputs/selects use mobile-safe sizing where relevant to avoid iOS zoom; taps work without hover assumptions.",
+        "Keyboard legend can compress or hide on narrow screens, but primary actions cannot become unreachable."
+      ]
+    },
+    {
+      "id": "ED-009",
+      "title": "Verification fixtures and documentation",
+      "priority": "p1",
+      "summary": "Add repeatable tests for migration, render parity, and commit safety, plus document known sharp/CSS differences.",
+      "acceptanceCriteria": [
+        "Migration tests cover fresh DB, idempotent rerun, and upgrading an existing Feature 2 DB to 003.",
+        "Backend tests exercise adjustment JSON validation and reject invalid crop/range values.",
+        "A fixture render test compares output dimensions, crop bounds, and deterministic file creation for at least one JPEG.",
+        "Manual QA notes include desktop and narrow-width screenshots before the feature is marked shipped."
+      ]
+    }
   ],
   "backendDependencies": [
-    "sharp npm package for image processing (npm install sharp)",
-    "Immich asset upload endpoint: POST /api/assets (multipart form-data: assetData file, fileCreatedAt, fileModifiedAt)",
-    "Temporary storage for rendered files: ./tmp/ or configurable path, cleaned after upload"
+    "sharp npm package for image processing, added only with this feature.",
+    "Immich original asset download endpoint already used/proxied server-side; verify exact API shape against current local Immich before coding upload/stack calls.",
+    "Immich asset upload endpoint and stack endpoint for final Commit integration.",
+    "Configurable PHOTODESK_EDIT_DIR for rendered files; production should prefer a durable path outside volatile tmp."
   ],
   "researchNeeded": [
-    "sharp filter equivalents for CSS brightness/contrast/saturate — sharp uses different parameter semantics (e.g., sharp.modulate for brightness, sharp.linear for contrast)",
-    "Temperature simulation in sharp: no direct equivalent to CSS warm/cool soft-light blend. May need compositing with a tinted overlay.",
-    "Vignette in sharp: radial gradient composite. sharp.composite with a pre-generated vignette mask.",
-    "Crop in sharp: sharp.extract({ left, top, width, height }) after computing the crop rectangle from the aspect ratio and the original image dimensions.",
-    "HEIC handling: iPhone photos may be HEIC. sharp supports HEIC read (with libvips compiled with libheif). The thumbnail proxy already serves preview-sized JPEGs, but for editing we need the original. Immich GET /api/assets/:id/original returns the raw file."
+    "sharp equivalents for CSS brightness/contrast/saturate/highlights/shadows and acceptable preview/output tolerances.",
+    "Temperature simulation in sharp, likely via tint/overlay/composite rather than a direct API.",
+    "Vignette generation through a radial mask/composite.",
+    "HEIC support in the installed sharp/libvips build on the deployment host.",
+    "Current Immich upload and stacking request/response details against the local Immich version before implementation."
   ],
-  "status": "planned",
-  "detailLevel": "outline — will be expanded when Feature #1 and #2 are shipped"
+  "outOfScope": [
+    "Brush/local masking tools",
+    "AI/object removal",
+    "RAW workflow",
+    "Batch edit synchronization across assets",
+    "Advanced color grading beyond presets and basic sliders"
+  ]
 }

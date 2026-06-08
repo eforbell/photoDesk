@@ -1,12 +1,14 @@
 ## Codebase Patterns
 - Express/CommonJS throughout, no TypeScript, no build step
 - SQLite via better-sqlite3 with WAL mode and foreign keys
+- Schema changes use numbered SQL files in db/migrations; db/schema.sql mirrors the current full shape
+- App startup and deploys run the same migration runner; pre-migration Feature 2 databases adopt the verified baseline
 - Immich API proxied through /api/proxy/thumbnail/:assetId to keep API key server-side
 - Frontend is vanilla JS in public/ (app.js, styles.css, index.html)
 - State: decisionMap (pick/reject), ratingMap (1-5), stackGroups (manual), stackGroupMap (assetId -> groupId)
 - Scene clustering by fileCreatedAt time proximity (configurable threshold in seconds)
 - Lightbox navigation respects active filters (shouldShowAsset function)
-- DB tables: sessions, scenes, decisions, ratings, stack_groups
+- DB tables: schema_migrations, sessions, scenes, decisions, ratings, stack_groups, processed_assets, density_cache
 - Immich endpoints: POST /api/search/metadata, GET /api/assets/:id/thumbnail, POST /api/stacks, DELETE /api/assets, PUT /api/assets/:id
 
 ## 2026-06-07 — Feature #0: Foundation
@@ -72,4 +74,15 @@
   - Calendar selection should use stable date selectors in automation; element refs become stale as live thumbnails and lazy rendering settle.
   - Follow-up UX polish: softened product wording from cull/culling/culled to review/reviewing/reviewed on user-facing surfaces, made suggested-batch names editable before session start, and allowed 0–5 rating keys from every workspace pass while keeping the bottom legends uncluttered.
   - Mobile follow-up: reflowed the workspace header into session/filter and stage-rail rows below 700px, compacted the four stage controls below 430px, and verified Commit remains directly visible and tappable at 390px.
+---
+
+## 2026-06-08 — Delivery Baseline + Feature #3 Readiness
+- Replaced inline schema bootstrapping with numbered SQLite migrations and captured the current complete schema in `db/schema.sql`.
+- Added safe adoption for existing Feature 2 databases, rejecting partial/unknown legacy shapes instead of guessing.
+- Added a git-based deploy script and starter systemd unit following the established homeApps pull -> install -> migrate -> restart pattern.
+- Consolidated durable build learnings and expanded Feature #3 into an actionable editor PRD with schema, persistence, commit retry, visual, and narrow-screen acceptance criteria.
+- **Learnings:**
+  - A baseline migration must distinguish an empty database from an existing matching database; executing non-idempotent baseline DDL against the latter is unsafe.
+  - Baseline adoption needs a follow-up idempotent index migration so legacy databases and fresh databases converge on the same physical schema.
+  - Runtime data paths and deployment checkout paths should be independently configurable before edited render files are introduced.
 ---

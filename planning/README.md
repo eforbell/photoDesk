@@ -8,6 +8,8 @@ Feature-driven development tracking for PhotoDesk, the photo review & light-edit
 - `progress.txt` -- Chronological development log
 - `features/` -- Per-feature PRD (JSON) and summary (MD) pairs
 - `iteration-process.md` -- Agent iteration instructions
+- `feature-build-learnings.md` -- Durable product, UX, data, and delivery lessons
+- `database-and-deployment.md` -- SQLite migration and git deploy policy
 
 ## Feature Pipeline
 

@@ -1,0 +1,17 @@
+[Unit]
+Description=PhotoDesk Immich Review App
+After=network.target
+
+[Service]
+Type=simple
+User=your-username
+WorkingDirectory=/data/apps/photoDesk
+EnvironmentFile=/data/apps/photoDesk/.env
+Environment=NODE_ENV=production
+ExecStart=/usr/bin/node /data/apps/photoDesk/server.js
+Restart=always
+RestartSec=5
+KillSignal=SIGTERM
+
+[Install]
+WantedBy=multi-user.target
