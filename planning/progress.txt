@@ -71,4 +71,5 @@
   - Hidden utility styles must override component display rules; otherwise hidden panels can leak into high-fidelity layouts.
   - Calendar selection should use stable date selectors in automation; element refs become stale as live thumbnails and lazy rendering settle.
   - Follow-up UX polish: softened product wording from cull/culling/culled to review/reviewing/reviewed on user-facing surfaces, made suggested-batch names editable before session start, and allowed 0–5 rating keys from every workspace pass while keeping the bottom legends uncluttered.
+  - Mobile follow-up: reflowed the workspace header into session/filter and stage-rail rows below 700px, compacted the four stage controls below 430px, and verified Commit remains directly visible and tappable at 390px.
 ---
