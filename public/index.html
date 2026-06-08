@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>PhotoDesk</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+
+  <!-- HOME SCREEN -->
+  <div id="screen-home" class="screen active">
+    <header class="app-header">
+      <h1 class="app-title">PhotoDesk</h1>
+      <p class="app-subtitle">Photo culling for Immich</p>
+    </header>
+
+    <main class="home-main">
+      <section class="new-session-panel">
+        <h2>New Session</h2>
+        <form id="new-session-form">
+          <div class="form-row">
+            <label for="session-name">Session name</label>
+            <input type="text" id="session-name" placeholder="e.g. Weekend Trip" required />
+          </div>
+          <div class="form-row form-row-cols">
+            <div>
+              <label for="date-from">From</label>
+              <input type="date" id="date-from" />
+            </div>
+            <div>
+              <label for="date-to">To</label>
+              <input type="date" id="date-to" />
+            </div>
+          </div>
+          <div class="form-row">
+            <label for="scene-threshold">
+              Scene threshold: <span id="threshold-display">30</span>s
+            </label>
+            <input type="range" id="scene-threshold" min="5" max="300" value="30" step="5" />
+          </div>
+          <button type="submit" class="btn btn-primary" id="create-btn">
+            Fetch &amp; Start Session
+          </button>
+        </form>
+      </section>
+
+      <section class="sessions-list-panel">
+        <h2>Past Sessions</h2>
+        <div id="sessions-list">
+          <p class="muted">Loading sessions...</p>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <!-- REVIEW SCREEN -->
+  <div id="screen-review" class="screen">
+    <div class="review-topbar">
+      <div class="topbar-left">
+        <button class="btn btn-ghost btn-sm" id="back-to-home">← Home</button>
+        <span id="session-name-display" class="session-name-label"></span>
+      </div>
+
+      <div class="mode-tabs">
+        <button class="mode-tab active" data-mode="triage" id="tab-triage">Triage</button>
+        <button class="mode-tab" data-mode="rate" id="tab-rate">Rate</button>
+        <button class="mode-tab" data-mode="stack" id="tab-stack">Stack</button>
+      </div>
+
+      <div class="topbar-right">
+        <div class="filter-controls">
+          <label class="toggle-label">
+            <input type="checkbox" id="filter-hide-rejects" />
+            Hide rejects
+          </label>
+          <select id="filter-show" class="filter-select">
+            <option value="all">All</option>
+            <option value="picked">Picked</option>
+            <option value="unrated">Unrated</option>
+            <option value="rated">Rated</option>
+          </select>
+        </div>
+        <button class="btn btn-commit btn-sm" id="go-to-summary">Summary</button>
+      </div>
+    </div>
+
+    <!-- GRID VIEW -->
+    <div id="grid-view" class="grid-view">
+      <div id="photo-grid" class="photo-grid"></div>
+    </div>
+
+    <!-- LIGHTBOX -->
+    <div id="lightbox" class="lightbox hidden">
+      <button class="lb-close" id="lb-close" aria-label="Close lightbox">&#x2715;</button>
+      <button class="lb-nav lb-prev" id="lb-prev" aria-label="Previous photo">&#8249;</button>
+
+      <div class="lb-main">
+        <div class="lb-image-wrap">
+          <img id="lb-image" src="" alt="Photo" />
+          <div class="lb-flash" id="lb-flash"></div>
+          <div class="lb-decision-badge" id="lb-decision-badge"></div>
+          <div class="lb-stars" id="lb-stars"></div>
+        </div>
+        <div class="lb-meta">
+          <span id="photo-progress"></span>
+        </div>
+      </div>
+
+      <button class="lb-nav lb-next" id="lb-next" aria-label="Next photo">&#8250;</button>
+
+      <div class="lb-hints" id="lb-hints"></div>
+    </div>
+
+    <!-- STACK MODE: group action bar -->
+    <div id="stack-action-bar" class="stack-action-bar hidden">
+      <span id="stack-selection-count">0 selected</span>
+      <button class="btn btn-primary btn-sm" id="btn-group-stack" disabled>Group as Stack</button>
+      <button class="btn btn-ghost btn-sm" id="btn-clear-selection">Clear</button>
+    </div>
+  </div>
+
+  <!-- SUMMARY SCREEN -->
+  <div id="screen-summary" class="screen">
+    <div class="summary-wrap">
+      <h2>Session Summary</h2>
+      <div id="summary-stats" class="summary-stats"></div>
+
+      <div class="commit-options">
+        <h3>What to commit:</h3>
+        <label class="checkbox-label">
+          <input type="checkbox" id="opt-trash-rejects" checked />
+          Trash rejects in Immich
+        </label>
+        <label class="checkbox-label">
+          <input type="checkbox" id="opt-write-ratings" checked />
+          Write star ratings to Immich
+        </label>
+        <label class="checkbox-label">
+          <input type="checkbox" id="opt-create-stacks" checked />
+          Create stacks in Immich
+        </label>
+      </div>
+
+      <div class="summary-actions">
+        <button class="btn btn-ghost" id="back-to-review">Back to Review</button>
+        <button class="btn btn-primary" id="commit-btn">Commit to Immich</button>
+      </div>
+      <div id="commit-result" class="commit-result hidden"></div>
+    </div>
+  </div>
+
+  <div id="loading-overlay" class="loading-overlay hidden">
+    <div class="spinner"></div>
+    <p id="loading-msg">Loading...</p>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
