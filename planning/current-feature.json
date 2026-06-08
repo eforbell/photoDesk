@@ -1,0 +1,15 @@
+{
+  "currentFeature": "Feature #1: Visual System + Workspace Redesign",
+  "status": "planned",
+  "branch": "feature/1-visual-workspace",
+  "prdPath": "planning/features/feature-1-visual-workspace.json",
+  "completedFeatures": [
+    "Feature #0: Foundation (Express backend, SQLite, Immich API client, scene clustering, basic multi-pass culling UI)"
+  ],
+  "skippedFeatures": [],
+  "futureFeatures": [
+    "Feature #2: Library / Discover Screen",
+    "Feature #3: Editor (Crop + Adjustments + Presets)",
+    "Feature #4: Commit Hardening + Edited Asset Upload"
+  ]
+}

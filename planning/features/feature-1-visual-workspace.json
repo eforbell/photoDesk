@@ -1,0 +1,211 @@
+{
+  "branchName": "feature/1-visual-workspace",
+  "projectName": "PhotoDesk",
+  "description": "Apply the high-fidelity design system to the existing workspace. Restyle every surface — grid, lightbox, topbar, thumbnails, summary — to match the design handoff. Add the ProgressRail, scene headers with timestamps, filmstrip in lightbox, keyboard legend, and toast notifications. This transforms the working prototype into a polished photo tool.",
+  "designReference": "design/design_handoff_photodesk/README.md — tokens, layout specs, interaction patterns are final.",
+  "principles": [
+    "Visual fidelity to the design reference — tokens, spacing, radii, typography are final",
+    "Keep existing backend untouched — this is a frontend-only feature",
+    "No new dependencies — vanilla CSS and JS only",
+    "Keyboard-first — every interaction works without a mouse",
+    "Dark-only — neutral graphite chrome so photos are judged without color bias",
+    "Incremental — each story produces a visible, testable improvement"
+  ],
+  "techStack": {
+    "frontend": "Vanilla HTML/CSS/JS in public/",
+    "fonts": "Hanken Grotesk (sans, 400/500/600/700) + JetBrains Mono (mono, 400/500/600) via Google Fonts link",
+    "colorSystem": "OKLCH via CSS custom properties (design/design_handoff_photodesk/theme.css is the source)",
+    "backend": "No backend changes in this feature"
+  },
+  "fileStructure": {
+    "description": "All changes in public/. styles.css gets a full rewrite from the design tokens. index.html gets structural updates. app.js gets UI logic additions.",
+    "touchedFiles": [
+      "public/styles.css — full rewrite: design tokens, component styles, responsive grid, lightbox, filmstrip",
+      "public/index.html — structural: ProgressRail markup, scene headers, filmstrip container, toast container, keyboard legend",
+      "public/app.js — logic: ProgressRail interactivity, filmstrip rendering, scene timestamps, keyboard focus in grid, toast system, Enter/Shift+Enter scene navigation in lightbox"
+    ]
+  },
+  "userStories": [
+    {
+      "id": "VW-001",
+      "title": "Design tokens and base styles",
+      "acceptanceCriteria": [
+        "Rewrite styles.css with all CSS custom properties from theme.css (neutrals, accent, semantic, typography, radii, shadows, motion)",
+        "Import Hanken Grotesk (400,500,600,700) and JetBrains Mono (400,500,600) via Google Fonts link in index.html",
+        "Body uses --bg background, --text color, --sans font family",
+        "Add .mono utility class: --mono font, font-feature-settings tnum, letter-spacing 0.02em",
+        "Add .kbd utility: inline kbd style matching the design (panel-2 bg, border, small mono text)",
+        "Scrollbar styling: thin, --panel-3 thumb, transparent track",
+        "All existing elements inherit the new token system (no visual regressions in layout)"
+      ],
+      "priority": 1,
+      "passes": true,
+      "notes": "This is the foundation — every subsequent story builds on these tokens. Copy OKLCH values exactly from theme.css."
+    },
+    {
+      "id": "VW-002",
+      "title": "Topbar and ProgressRail",
+      "acceptanceCriteria": [
+        "Replace the flat mode-tab buttons with the ProgressRail component from the design",
+        "Rail layout: Cull -> Rate -> Stack -> Commit as a connected horizontal sequence with connector lines",
+        "Each step: circular status indicator (accent when active, green check when prior pass done), label, live count chip",
+        "Connector lines fill with accent color as you progress through passes",
+        "Clicking any step switches to that pass (same as current tab behavior)",
+        "Clicking Commit opens the summary screen",
+        "Topbar is 3-column grid: left (Home + session name in 14/600 + mono metadata), center (rail), right (Hide rejects + filter select + Summary removed since Commit is in rail)",
+        "Session name and 'N frames · N scenes' metadata shown in topbar left",
+        "All topbar elements use correct tokens (--panel background, --border-soft bottom border)"
+      ],
+      "priority": 2,
+      "passes": true,
+      "notes": "The ProgressRail is the signature navigation element. Reference workspace.jsx ProgressRail function. The 'Summary' button goes away — Commit step in the rail replaces it."
+    },
+    {
+      "id": "VW-003",
+      "title": "Scene headers and grid layout",
+      "acceptanceCriteria": [
+        "Scene separators show: 'Scene N' label + timestamp (from first asset's fileCreatedAt, format HH:MM) + frame count ('N frames')",
+        "Scene header: left-aligned label in 13px/600 with mono timestamp and frame count, horizontal rule across remaining width",
+        "Grid uses CSS flex-wrap with --thumb width variable (default ~200px) and --grid-gap (default 10px)",
+        "Thumbnails are aspect-ratio aware: apply the photo's aspect ratio to the grid item (requires storing aspect ratio per asset — use width/height from Immich asset response)",
+        "Grid items have --r-sm (5px) border radius with overflow hidden",
+        "Proper spacing: 4px base rhythm, section spacing 28-44px between scenes"
+      ],
+      "priority": 3,
+      "passes": true,
+      "notes": "Requires backend change: store asset width/height (or aspect ratio) when creating sessions. The Immich search response includes width and height fields per asset. Store in a new asset_meta column on scenes or a separate table. Alternatively, store the full asset list with metadata in the scenes table's asset_ids JSON (expand from just IDs to [{id, ar, file, time}])."
+    },
+    {
+      "id": "VW-004",
+      "title": "Thumbnail component restyling",
+      "acceptanceCriteria": [
+        "Focus ring: 2px solid accent with 0 0 0 4px accent-dim glow on the focused thumbnail",
+        "Keep status: green (--keep) outline, small green dot badge top-left with checkmark",
+        "Reject status: red (--reject) outline, red X badge top-left, dark scrim overlay (rgba(0,0,0,0.42))",
+        "Star ratings: gold stars (--star color) shown at bottom of thumbnail over a subtle gradient",
+        "Stack mode: checkbox replaces status badge top-left (accent when selected, translucent dark when not)",
+        "Stack group badge: accent-colored link icon + group number badge top-right",
+        "Hover state: reveal quick-action buttons (keep/reject in Cull mode, maximize always) over a bottom gradient",
+        "Reject thumbnails dim to 40% opacity in Stack mode",
+        "Existing pick/reject/star/stack visual indicators all update to use new token colors"
+      ],
+      "priority": 4,
+      "passes": true,
+      "notes": "The Thumb component in workspace.jsx is the reference. The hover quick-actions are a nice touch for mouse users but keyboard is primary."
+    },
+    {
+      "id": "VW-005",
+      "title": "Pass hint strip and keyboard legend",
+      "acceptanceCriteria": [
+        "Below the topbar, a centered one-line hint for the current pass with an icon",
+        "Cull: checkmark icon + 'Keep or reject, fast.'",
+        "Rate: star icon + 'Star the survivors.'",
+        "Stack: layers icon + 'Group same-shot variants.'",
+        "Bottom of screen: sticky keyboard shortcut legend bar, content changes per pass",
+        "Cull: P Keep · X Reject · U Unset · ←→ Move · ↵ Open · E Edit",
+        "Rate: 1-5 Rate · 0 Clear · X Reject · ←→ Move · ↵ Open · E Edit",
+        "Stack: Space/click Select · G Group · ←→ Move · ↵ Open",
+        "In lightbox: legend updates to show lightbox-specific shortcuts (Enter = next scene, Shift+Enter = prev scene, Esc = close)",
+        "Legend uses .kbd styling for key indicators, muted text for labels"
+      ],
+      "priority": 5,
+      "passes": true,
+      "notes": "The hint strip is subtle but important UX — reminds the user what mode they're in without being intrusive."
+    },
+    {
+      "id": "VW-006",
+      "title": "Lightbox redesign",
+      "acceptanceCriteria": [
+        "Full-screen fixed overlay with --bg-deep background",
+        "Header: close X button (top-left), mono filename, 'i / N' counter, Edit button (top-right)",
+        "Center stage: image with max-width 1200px, drop shadow (--shadow-3), rounded corners",
+        "Large circular prev/next navigation buttons on either side of the image (outside the image bounds)",
+        "Status badge: large keep/reject indicator overlaid on image top-right when set",
+        "Interactive star rating row centered below the image (clickable + keyboard 1-5)",
+        "Stars use --star color (gold), empty stars use --text-ghost",
+        "Enter key jumps to first frame of NEXT scene; Shift+Enter jumps to first frame of PREVIOUS scene",
+        "Escape closes lightbox and returns focus to the grid item that was open"
+      ],
+      "priority": 6,
+      "passes": true,
+      "notes": "Reference lightbox.jsx Lightbox function. The scene-jumping via Enter/Shift+Enter is a key workflow improvement — lets you skip through scenes without going back to the grid."
+    },
+    {
+      "id": "VW-007",
+      "title": "Filmstrip in lightbox",
+      "acceptanceCriteria": [
+        "Horizontal scrollable strip of thumbnails below the main image, above the keyboard legend",
+        "Thumbnails are 64px tall, aspect-ratio aware",
+        "Active thumbnail has accent ring + auto-centers in the strip on navigation",
+        "Status dot overlay (green/red) and star count visible on filmstrip thumbnails",
+        "Clicking a filmstrip thumbnail navigates to that photo",
+        "Strip scrolls smoothly to keep the active thumbnail centered",
+        "Filmstrip respects current filters (hidden rejects don't appear)"
+      ],
+      "priority": 7,
+      "passes": true,
+      "notes": "The filmstrip is key for spatial awareness — you can see where you are in the sequence and jump to any photo. Auto-centering on navigation is critical."
+    },
+    {
+      "id": "VW-008",
+      "title": "Grid keyboard focus navigation",
+      "acceptanceCriteria": [
+        "Arrow keys move focus between thumbnails in the grid (left/right within a scene, wrapping to next/prev scene)",
+        "Focused thumbnail has the accent ring + glow from VW-004",
+        "Auto-scroll: grid scrolls to keep focused thumbnail visible (with 70px top padding, 20px bottom padding)",
+        "Enter or O opens the lightbox on the focused thumbnail",
+        "E opens the editor on the focused thumbnail (placeholder for Phase 3)",
+        "Pass-specific keys work on the focused thumbnail: P/X/U in Cull, 1-5/0/X in Rate, Space to toggle selection in Stack",
+        "G in Stack mode groups current selection (same as Group as Stack button)",
+        "Focus persists when switching passes (stays on the same photo if still visible)"
+      ],
+      "priority": 8,
+      "passes": true,
+      "notes": "This enables full keyboard-only culling from the grid without ever opening the lightbox. Reference shell.jsx keyboard handler. The grid needs data-pid attributes on thumbnails for focus tracking."
+    },
+    {
+      "id": "VW-009",
+      "title": "Toast notifications",
+      "acceptanceCriteria": [
+        "Toast system: fixed position bottom-center, styled card with check icon",
+        "Toast auto-dismisses after ~2.4 seconds",
+        "Toast shown on: stack group created ('Grouped N frames into stack M')",
+        "Toast styling: --panel-2 background, --border-strong border, --shadow-3, 13.5px text, green check icon",
+        "Only one toast visible at a time (new toast replaces existing)"
+      ],
+      "priority": 9,
+      "passes": true,
+      "notes": "Toasts will also be used in Phase 3 for edit saves. Keep the implementation generic."
+    },
+    {
+      "id": "VW-010",
+      "title": "Summary / Commit screen restyling",
+      "acceptanceCriteria": [
+        "Centered card layout (max-width 560px) matching the design",
+        "Eyebrow text: session name in mono uppercase",
+        "'Commit to Immich' as the main heading",
+        "2x3 grid of stat tiles: Kept (green), Rejected (red), Undecided (neutral), Rated (gold), Stacks (accent), Edited (accent, shows 0 for now)",
+        "Each stat tile: colored number, uppercase label, panel background with border",
+        "'What to push' section: four checkbox rows with colored dot, title, mono sub-detail",
+        "Four rows: Trash rejects, Write star ratings, Create stacks, Upload edited versions (disabled/0 for now)",
+        "'Commit to Immich ->' primary button (accent color, full width)",
+        "Live progress log: each action appends a green check line as it completes, ending with 'Done. Immich is up to date.'"
+      ],
+      "priority": 10,
+      "passes": true,
+      "notes": "The fourth checkbox (Upload edited versions) is a placeholder for Phase 3 — show it but disable or show 0 count. The live progress log replaces the current all-at-once result display."
+    }
+  ],
+  "riskAssessment": {
+    "medium": [
+      "Aspect-ratio-aware thumbnails require storing width/height from Immich — needs a minor backend+DB change in VW-003",
+      "OKLCH color support: requires modern browsers (Chrome 111+, Safari 15.4+, Firefox 113+) — acceptable for a self-hosted tool",
+      "Grid keyboard navigation with flex-wrap: arrow key movement across rows needs careful index math"
+    ],
+    "low": [
+      "Font loading: Google Fonts link is straightforward, self-hosting is a later optimization",
+      "Filmstrip auto-centering: scrollIntoView with smooth behavior handles most cases",
+      "Toast timing: simple setTimeout, no complex queue needed"
+    ]
+  }
+}

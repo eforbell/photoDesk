@@ -55,7 +55,15 @@ router.post('/sessions', async (req, res) => {
 
       for (let i = 0; i < sceneClusters.length; i++) {
         const scene = sceneClusters[i];
-        insertScene.run(sessionId, i, JSON.stringify(scene.map(a => a.id)));
+        // Store full asset metadata for aspect ratios, filenames, timestamps
+        const assetData = scene.map(a => ({
+          id: a.id,
+          width: a.exifInfo?.exifImageWidth || a.originalWidth || 0,
+          height: a.exifInfo?.exifImageHeight || a.originalHeight || 0,
+          originalFileName: a.originalFileName || '',
+          fileCreatedAt: a.fileCreatedAt || '',
+        }));
+        insertScene.run(sessionId, i, JSON.stringify(assetData));
       }
 
       return sessionId;
@@ -84,7 +92,12 @@ router.get('/sessions/:id', (req, res) => {
 
   res.json({
     ...session,
-    scenes: scenes.map(s => ({ ...s, asset_ids: JSON.parse(s.asset_ids) })),
+    scenes: scenes.map(s => {
+      const raw = JSON.parse(s.asset_ids);
+      const isLegacy = raw.length > 0 && typeof raw[0] === 'string';
+      const assets = isLegacy ? raw.map(id => ({ id, width: 0, height: 0, originalFileName: '', fileCreatedAt: '' })) : raw;
+      return { ...s, asset_ids: assets.map(a => a.id), assets };
+    }),
     decisions,
     ratings,
     stackGroups: stackGroups.map(sg => ({ ...sg, asset_ids: JSON.parse(sg.asset_ids) })),
@@ -128,10 +141,15 @@ router.get('/sessions/:id/scenes', (req, res) => {
 
   res.json({
     scenes: scenes.map(s => {
-      const assetIds = JSON.parse(s.asset_ids);
+      const raw = JSON.parse(s.asset_ids);
+      // Support both old format (array of strings) and new format (array of objects)
+      const isLegacy = raw.length > 0 && typeof raw[0] === 'string';
+      const assets = isLegacy ? raw.map(id => ({ id, width: 0, height: 0, originalFileName: '', fileCreatedAt: '' })) : raw;
+      const assetIds = assets.map(a => a.id);
       return {
         ...s,
         asset_ids: assetIds,
+        assets,
         decisions: assetIds.reduce((acc, id) => {
           acc[id] = decisionMap[id] || null;
           return acc;

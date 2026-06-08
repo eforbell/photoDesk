@@ -1,30 +1,62 @@
 /* ── PhotoDesk frontend — multi-pass culling ───────────────── */
 
-// ── State ────────────────────────────────────────────────────
+// ── SVG Icons ──────────────────────────────────────────────────
+function icon(name, size = 16, strokeW = 1.6) {
+  const a = `width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="${strokeW}" stroke-linecap="round" stroke-linejoin="round"`;
+  const icons = {
+    home:     `<svg ${a}><path d="M3 11l9-7 9 7"/><path d="M5 10v9h14v-9"/></svg>`,
+    chevL:    `<svg ${a}><path d="M15 18l-6-6 6-6"/></svg>`,
+    chevR:    `<svg ${a}><path d="M9 6l6 6-6 6"/></svg>`,
+    x:        `<svg ${a}><path d="M18 6L6 18M6 6l12 12"/></svg>`,
+    check:    `<svg ${a}><path d="M5 12l5 5L20 6"/></svg>`,
+    keep:     `<svg ${a}><path d="M5 12l5 5L20 6"/></svg>`,
+    reject:   `<svg ${a}><path d="M18 6L6 18M6 6l12 12"/></svg>`,
+    star:     `<svg ${a}><path d="M12 3l2.6 5.6 6 .7-4.4 4.1 1.2 6L12 16.9 6.6 19.4l1.2-6L3.4 9.3l6-.7z"/></svg>`,
+    stack:    `<svg ${a}><path d="M12 3l9 5-9 5-9-5 9-5z"/><path d="M3 13l9 5 9-5"/></svg>`,
+    layers:   `<svg ${a}><path d="M12 3l9 5-9 5-9-5 9-5z"/><path d="M3 13l9 5 9-5"/></svg>`,
+    maximize: `<svg ${a}><path d="M8 3H5a2 2 0 0 0-2 2v3M16 3h3a2 2 0 0 1 2 2v3M21 16v3a2 2 0 0 1-2 2h-3M3 16v3a2 2 0 0 0 2 2h3"/></svg>`,
+    arrowR:   `<svg ${a}><path d="M5 12h14M13 6l6 6-6 6"/></svg>`,
+  };
+  return icons[name] || '';
+}
+
+// ── Pass definitions ───────────────────────────────────────────
+const PASSES = [
+  { id: 'cull',   label: 'Cull',   icon: 'keep',   hint: 'Keep or reject, fast.' },
+  { id: 'rate',   label: 'Rate',   icon: 'star',   hint: 'Star the survivors.' },
+  { id: 'stack',  label: 'Stack',  icon: 'stack',  hint: 'Group same-shot variants.' },
+  { id: 'commit', label: 'Commit', icon: 'arrowR', hint: 'Push to Immich.' },
+];
+
+// ── State ──────────────────────────────────────────────────────
 const state = {
-  currentSession: null,  // session object
-  scenes: [],            // [{id, scene_index, asset_ids:[]}]
-  allAssets: [],         // flat ordered list of all assetIds across all scenes
+  currentSession: null,
+  scenes: [],            // [{id, scene_index, asset_ids:[], assets:[{id,width,height,originalFileName,fileCreatedAt}]}]
+  allAssets: [],         // flat ordered list of all assetIds
+  assetMeta: {},         // assetId -> {width, height, originalFileName, fileCreatedAt}
   sceneForAsset: {},     // assetId -> scene index (0-based)
 
-  decisionMap: {},       // assetId -> 'pick'|'reject'|null
-  ratingMap: {},         // assetId -> 1-5|null
-  stackGroups: [],       // [{id, asset_ids:[]}]
-  stackGroupMap: {},     // assetId -> stackGroupId
+  decisionMap: {},
+  ratingMap: {},
+  stackGroups: [],
+  stackGroupMap: {},
 
-  mode: 'triage',        // 'triage'|'rate'|'stack'
+  mode: 'cull',          // 'cull'|'rate'|'stack'
   hideRejects: false,
-  filterShow: 'all',     // 'all'|'picked'|'unrated'|'rated'
+  filterShow: 'all',
 
   // Lightbox
   lightboxOpen: false,
-  lightboxIndex: 0,      // index into allAssets
+  lightboxIndex: 0,
 
   // Stack mode selection
-  stackSelection: new Set(), // selected assetIds
+  stackSelection: new Set(),
+
+  // Grid focus
+  focusedAssetId: null,
 };
 
-// ── DOM shortcuts ─────────────────────────────────────────────
+// ── DOM shortcuts ──────────────────────────────────────────────
 const $ = id => document.getElementById(id);
 
 const screens = {
@@ -38,7 +70,7 @@ function showScreen(name) {
   screens[name].classList.add('active');
 }
 
-// ── Loading overlay ───────────────────────────────────────────
+// ── Loading overlay ────────────────────────────────────────────
 function showLoading(msg = 'Loading...') {
   $('loading-msg').textContent = msg;
   $('loading-overlay').classList.remove('hidden');
@@ -47,7 +79,17 @@ function hideLoading() {
   $('loading-overlay').classList.add('hidden');
 }
 
-// ── API helpers ───────────────────────────────────────────────
+// ── Toast system ───────────────────────────────────────────────
+let toastTimer = null;
+function showToast(msg) {
+  const el = $('toast');
+  el.innerHTML = `${icon('check', 15, 2.2)} ${escHtml(msg)}`;
+  el.classList.remove('hidden');
+  if (toastTimer) clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { el.classList.add('hidden'); toastTimer = null; }, 2400);
+}
+
+// ── API helpers ────────────────────────────────────────────────
 async function api(method, path, body) {
   const opts = {
     method,
@@ -63,7 +105,7 @@ async function api(method, path, body) {
   return res.json();
 }
 
-// ── HOME SCREEN ───────────────────────────────────────────────
+// ── HOME SCREEN ────────────────────────────────────────────────
 async function loadSessions() {
   const list = $('sessions-list');
   try {
@@ -126,14 +168,13 @@ $('new-session-form').addEventListener('submit', async function (e) {
   }
 });
 
-// ── Open a session ────────────────────────────────────────────
+// ── Open a session ─────────────────────────────────────────────
 async function openSession(sessionId) {
   showLoading('Loading session...');
   try {
-    const [sessionData, scenesData] = await Promise.all([
-      api('GET', `/api/sessions/${sessionId}`),
-      api('GET', `/api/sessions/${sessionId}/scenes`),
-    ]);
+    const scenesData = await api('GET', `/api/sessions/${sessionId}/scenes`);
+    // Also fetch session info from the scenes response or separately
+    const sessionData = await api('GET', `/api/sessions/${sessionId}`);
 
     state.currentSession = sessionData;
     state.scenes = scenesData.scenes;
@@ -141,21 +182,32 @@ async function openSession(sessionId) {
     state.ratingMap = scenesData.ratingMap || {};
     state.stackGroups = scenesData.stackGroups || [];
     state.stackGroupMap = scenesData.stackGroupMap || {};
-    state.mode = 'triage';
+    state.mode = 'cull';
     state.hideRejects = false;
     state.filterShow = 'all';
     state.lightboxOpen = false;
     state.lightboxIndex = 0;
     state.stackSelection = new Set();
+    state.focusedAssetId = null;
 
-    // Build flat asset list and scene lookup
+    // Build flat asset list, scene lookup, and asset metadata
     state.allAssets = [];
     state.sceneForAsset = {};
+    state.assetMeta = {};
     for (const scene of state.scenes) {
-      for (const id of scene.asset_ids) {
+      const assets = scene.assets || [];
+      for (let i = 0; i < scene.asset_ids.length; i++) {
+        const id = scene.asset_ids[i];
+        const meta = assets[i] || { id, width: 0, height: 0, originalFileName: '', fileCreatedAt: '' };
         state.sceneForAsset[id] = scene.scene_index;
+        state.assetMeta[id] = meta;
         state.allAssets.push(id);
       }
+    }
+
+    // Set initial focus
+    if (state.allAssets.length > 0) {
+      state.focusedAssetId = state.allAssets[0];
     }
 
     hideLoading();
@@ -164,7 +216,12 @@ async function openSession(sessionId) {
     // Sync UI controls with state
     $('filter-hide-rejects').checked = state.hideRejects;
     $('filter-show').value = state.filterShow;
-    setMode('triage');
+
+    // Show session info in topbar
+    $('session-name-display').textContent = state.currentSession.name;
+    $('session-meta-display').textContent = `${state.allAssets.length} frames \u00B7 ${state.scenes.length} scenes`;
+
+    setMode('cull');
     renderGrid();
   } catch (err) {
     hideLoading();
@@ -172,14 +229,148 @@ async function openSession(sessionId) {
   }
 }
 
-// ── Mode management ───────────────────────────────────────────
+// ── Counts for the rail ────────────────────────────────────────
+function computeCounts() {
+  let picks = 0, rejects = 0, rated = 0;
+  const stackIds = new Set();
+  for (const id of state.allAssets) {
+    const d = state.decisionMap[id];
+    if (d === 'pick') picks++;
+    else if (d === 'reject') rejects++;
+    if (state.ratingMap[id]) rated++;
+    if (state.stackGroupMap[id] != null) {
+      stackIds.add(state.stackGroupMap[id]);
+    }
+  }
+  return {
+    cull: picks,
+    rate: rated,
+    stack: stackIds.size,
+    commit: rejects,
+    _picks: picks,
+    _rejects: rejects,
+    _rated: rated,
+    _stacks: stackIds.size,
+    _undecided: state.allAssets.length - picks - rejects,
+  };
+}
+
+// ── Progress Rail rendering ────────────────────────────────────
+function renderProgressRail() {
+  const rail = $('progress-rail');
+  const counts = computeCounts();
+  const passIdx = PASSES.findIndex(p => p.id === state.mode);
+  const commitIdx = PASSES.findIndex(p => p.id === 'commit');
+
+  let html = '';
+  PASSES.forEach((p, i) => {
+    const active = state.mode === p.id || (state.mode !== 'commit' && p.id === 'commit' && false);
+    const isActive = p.id === state.mode;
+    const done = i < passIdx;
+
+    // Connector
+    if (i > 0) {
+      const filled = i <= passIdx;
+      html += `<div class="rail-connector ${filled ? 'filled' : 'empty'}"></div>`;
+    }
+
+    // Step
+    const cls = ['rail-step'];
+    if (isActive) cls.push('active');
+    if (done) cls.push('done');
+
+    const dotIcon = done
+      ? icon('check', 13, 2.2)
+      : icon(p.icon, 13, 1.9);
+
+    const count = counts[p.id];
+    const countChip = count != null
+      ? `<span class="rail-step-count mono">${count}</span>`
+      : '';
+
+    html += `
+      <button class="${cls.join(' ')}" data-pass="${p.id}">
+        <span class="rail-step-dot">${dotIcon}</span>
+        <span>${p.label}</span>
+        ${countChip}
+      </button>
+    `;
+  });
+
+  rail.innerHTML = html;
+
+  // Attach click handlers
+  rail.querySelectorAll('.rail-step').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const passId = btn.dataset.pass;
+      if (passId === 'commit') {
+        showSummary();
+      } else {
+        setMode(passId);
+      }
+    });
+  });
+}
+
+// ── Pass hint strip ────────────────────────────────────────────
+function renderPassHint() {
+  const pass = PASSES.find(p => p.id === state.mode);
+  if (!pass || state.mode === 'commit') {
+    $('pass-hint').style.display = 'none';
+    return;
+  }
+  $('pass-hint').style.display = '';
+  $('pass-hint').innerHTML = `
+    <span class="hint-icon">${icon(pass.icon, 13)}</span>
+    <span class="hint-text">${pass.hint}</span>
+  `;
+}
+
+// ── Keyboard legend ────────────────────────────────────────────
+function renderKeyboardLegend() {
+  const el = $('keyboard-legend');
+  if (!el) return;
+
+  // Hide during lightbox or when stack bar is showing with selection
+  if (state.lightboxOpen) {
+    el.style.display = 'none';
+    return;
+  }
+  if (state.mode === 'stack' && state.stackSelection.size > 0) {
+    el.style.display = 'none';
+    return;
+  }
+
+  el.style.display = '';
+  let items = '';
+
+  if (state.mode === 'cull') {
+    items = `
+      ${legend('P', 'Keep')}${legend('X', 'Reject')}${legend('U', 'Unset')}
+      ${legend('\u2190\u2192', 'Move')}${legend('\u21B5', 'Open')}${legend('E', 'Edit')}
+    `;
+  } else if (state.mode === 'rate') {
+    items = `
+      ${legend('1\u20135', 'Rate')}${legend('0', 'Clear')}${legend('X', 'Reject')}
+      ${legend('\u2190\u2192', 'Move')}${legend('\u21B5', 'Open')}${legend('E', 'Edit')}
+    `;
+  } else if (state.mode === 'stack') {
+    items = `
+      ${legend('Space', 'Select')}${legend('G', 'Group')}
+      ${legend('\u2190\u2192', 'Move')}${legend('\u21B5', 'Open')}
+    `;
+  }
+
+  el.innerHTML = items;
+}
+
+function legend(key, label) {
+  return `<span class="legend-item"><span class="kbd">${key}</span> ${label}</span>`;
+}
+
+// ── Mode management ────────────────────────────────────────────
 function setMode(mode) {
   state.mode = mode;
-
-  // Update tab UI
-  document.querySelectorAll('.mode-tab').forEach(tab => {
-    tab.classList.toggle('active', tab.dataset.mode === mode);
-  });
 
   // Stack action bar
   if (mode === 'stack') {
@@ -190,25 +381,28 @@ function setMode(mode) {
     state.stackSelection.clear();
   }
 
-  // Auto-enable hide rejects in rate mode
-  if (mode === 'rate') {
+  // Auto-enable hide rejects in rate and stack modes
+  if (mode === 'rate' || mode === 'stack') {
     state.hideRejects = true;
     $('filter-hide-rejects').checked = true;
   }
 
-  // Close lightbox if opening stack mode
+  // Close lightbox if switching to stack mode
   if (mode === 'stack' && state.lightboxOpen) {
     closeLightbox();
   }
 
+  // Grid class for stack mode opacity
+  const gridView = $('grid-view');
+  gridView.classList.toggle('stack-mode', mode === 'stack');
+
+  renderProgressRail();
+  renderPassHint();
+  renderKeyboardLegend();
   renderGrid();
 }
 
-document.querySelectorAll('.mode-tab').forEach(tab => {
-  tab.addEventListener('click', () => setMode(tab.dataset.mode));
-});
-
-// ── Filter controls ───────────────────────────────────────────
+// ── Filter controls ────────────────────────────────────────────
 $('filter-hide-rejects').addEventListener('change', function () {
   state.hideRejects = this.checked;
   applyGridFilters();
@@ -222,18 +416,23 @@ $('filter-show').addEventListener('change', function () {
 function applyGridFilters() {
   const gridView = $('grid-view');
   gridView.classList.toggle('hide-rejects', state.hideRejects);
-  gridView.classList.remove('filter-picked', 'filter-unrated', 'filter-rated');
+  gridView.classList.remove('filter-picked', 'filter-unrated', 'filter-rated', 'filter-rejects');
   if (state.filterShow !== 'all') {
     gridView.classList.add(`filter-${state.filterShow}`);
   }
 }
 
-// ── GRID RENDERING ────────────────────────────────────────────
-const STACK_COLORS = ['#a855f7','#3b82f6','#f59e0b','#10b981','#f43f5e','#06b6d4'];
+// ── Visible asset list (respects filters) ──────────────────────
+function getVisibleAssets() {
+  return state.allAssets.filter(shouldShowAsset);
+}
+
+// ── GRID RENDERING ─────────────────────────────────────────────
+const STACK_COLORS = ['var(--accent)','oklch(0.70 0.12 192)','oklch(0.74 0.14 70)','oklch(0.74 0.15 152)','oklch(0.64 0.18 25)','oklch(0.70 0.12 220)'];
 
 function stackColorForGroup(groupId) {
   const idx = state.stackGroups.findIndex(sg => sg.id === groupId);
-  return STACK_COLORS[idx % STACK_COLORS.length] || '#999';
+  return STACK_COLORS[idx % STACK_COLORS.length] || 'var(--accent)';
 }
 
 function renderGrid() {
@@ -241,23 +440,57 @@ function renderGrid() {
   const fragments = [];
 
   let currentSceneIdx = -1;
+  let sceneAssetCount = 0;
+  let sceneFirstTime = '';
+
+  // Group assets by scene first
+  const sceneGroups = [];
+  let curGroup = null;
 
   for (const assetId of state.allAssets) {
     const sceneIdx = state.sceneForAsset[assetId];
+    if (!curGroup || curGroup.sceneIdx !== sceneIdx) {
+      curGroup = { sceneIdx, assets: [] };
+      sceneGroups.push(curGroup);
+    }
+    curGroup.assets.push(assetId);
+  }
 
-    // Scene separator
-    if (sceneIdx !== currentSceneIdx) {
-      currentSceneIdx = sceneIdx;
-      fragments.push(`
-        <div class="scene-separator">
-          <div class="scene-separator-line"></div>
-          <div class="scene-separator-label">Scene ${sceneIdx + 1}</div>
-          <div class="scene-separator-line"></div>
-        </div>
-      `);
+  for (const group of sceneGroups) {
+    const sceneIdx = group.sceneIdx;
+    const assetIds = group.assets;
+
+    // Get first asset's timestamp for the scene header
+    const firstAsset = state.assetMeta[assetIds[0]];
+    let timeStr = '';
+    if (firstAsset && firstAsset.fileCreatedAt) {
+      const d = new Date(firstAsset.fileCreatedAt);
+      timeStr = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
     }
 
-    fragments.push(renderGridItem(assetId));
+    const frameCount = assetIds.length;
+    const frameLabel = frameCount === 1 ? 'frame' : 'frames';
+
+    // Scene separator
+    fragments.push(`
+      <div class="scene-block" data-scene="${sceneIdx}">
+        <div class="scene-separator">
+          <div class="scene-separator-info">
+            <span class="scene-separator-label">Scene ${sceneIdx + 1}</span>
+            ${timeStr ? `<span class="scene-separator-time">${timeStr}</span>` : ''}
+            <span class="scene-separator-count">${frameCount} ${frameLabel}</span>
+          </div>
+          <div class="scene-separator-line"></div>
+        </div>
+        <div class="scene-tiles">
+          ${assetIds.map(id => renderGridItem(id)).join('')}
+        </div>
+      </div>
+    `);
+  }
+
+  if (sceneGroups.length === 0) {
+    fragments.push('<div class="no-frames">No frames match this filter.</div>');
   }
 
   grid.innerHTML = fragments.join('');
@@ -267,6 +500,7 @@ function renderGrid() {
     const assetId = el.dataset.assetId;
 
     el.addEventListener('click', () => {
+      state.focusedAssetId = assetId;
       if (state.mode === 'stack') {
         toggleStackSelection(assetId, el);
       } else {
@@ -276,6 +510,9 @@ function renderGrid() {
   });
 
   applyGridFilters();
+  updateFocusRing();
+  renderProgressRail();
+  renderKeyboardLegend();
 }
 
 function renderGridItem(assetId) {
@@ -284,6 +521,8 @@ function renderGridItem(assetId) {
   const stackGroupId = state.stackGroupMap[assetId] || null;
   const isStackSelected = state.stackSelection.has(assetId);
   const isRated = rating !== null;
+  const isFocused = state.focusedAssetId === assetId;
+  const meta = state.assetMeta[assetId] || {};
 
   const classes = ['grid-item'];
   if (decision === 'pick') classes.push('is-pick');
@@ -291,38 +530,73 @@ function renderGridItem(assetId) {
   if (isRated) classes.push('is-rated');
   if (stackGroupId) classes.push('in-stack-group');
   if (isStackSelected) classes.push('stack-selected');
+  if (isFocused) classes.push('is-focused');
+
+  // Compute aspect ratio
+  let aspectStyle = '';
+  if (meta.width && meta.height && meta.width > 0 && meta.height > 0) {
+    aspectStyle = `aspect-ratio: ${meta.width}/${meta.height};`;
+  } else {
+    aspectStyle = 'aspect-ratio: 3/2;';
+  }
 
   const inlineStyle = stackGroupId
-    ? `style="border-left-color: ${stackColorForGroup(stackGroupId)};"`
-    : '';
+    ? `style="${aspectStyle} border-left-color: ${stackColorForGroup(stackGroupId)};"`
+    : `style="${aspectStyle}"`;
 
   let badges = '';
 
+  // Reject scrim
+  if (decision === 'reject' && state.mode !== 'stack') {
+    badges += `<div class="reject-scrim"></div>`;
+  }
+
   if (state.mode === 'stack') {
-    const check = isStackSelected ? '&#10003;' : '';
-    badges += `<div class="grid-check">${check}</div>`;
+    const checkIcon = isStackSelected ? icon('check', 13, 2.4) : '';
+    badges += `<div class="grid-check">${checkIcon}</div>`;
   } else {
     if (decision === 'reject') {
-      badges += `<div class="grid-badge-reject">&#x2715;</div>`;
+      badges += `<div class="grid-badge-status reject">${icon('x', 11, 2.6)}</div>`;
     } else if (decision === 'pick') {
-      badges += `<div class="grid-badge-pick"></div>`;
+      badges += `<div class="grid-badge-status keep">${icon('check', 11, 2.6)}</div>`;
     }
   }
 
   if (rating) {
-    badges += `<div class="grid-stars">${'★'.repeat(rating)}</div>`;
+    badges += `<div class="grid-stars">${starIcons(rating, 12)}</div>`;
   }
 
   if (stackGroupId) {
-    badges += `<div class="grid-stack-badge">stack</div>`;
+    badges += `<div class="grid-stack-badge">${icon('stack', 9, 2.2)}${state.stackGroups.findIndex(sg => sg.id === stackGroupId) + 1}</div>`;
+  }
+
+  // Hover quick actions (only in cull mode + non-stack)
+  let hoverActions = '';
+  if (state.mode !== 'stack') {
+    let actionBtns = '';
+    if (state.mode === 'cull') {
+      actionBtns += `<button class="quick-btn" data-action="keep" title="Keep">${icon('keep', 14, 2.1)}</button>`;
+      actionBtns += `<button class="quick-btn" data-action="reject" title="Reject">${icon('reject', 14, 2.1)}</button>`;
+    }
+    actionBtns += `<button class="quick-btn" data-action="open" title="Open">${icon('maximize', 14, 2.1)}</button>`;
+    hoverActions = `<div class="grid-item-hover"><div class="grid-hover-actions">${actionBtns}</div></div>`;
   }
 
   return `
-    <div class="${classes.join(' ')}" data-asset-id="${assetId}" ${inlineStyle}>
+    <div class="${classes.join(' ')}" data-asset-id="${assetId}" data-pid="${assetId}" ${inlineStyle}>
       <img src="/api/proxy/thumbnail/${assetId}" loading="lazy" alt="" />
       ${badges}
+      ${hoverActions}
     </div>
   `;
+}
+
+function starIcons(count, size) {
+  let html = '';
+  for (let i = 0; i < count; i++) {
+    html += `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="var(--star)" stroke="var(--star)" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l2.6 5.6 6 .7-4.4 4.1 1.2 6L12 16.9 6.6 19.4l1.2-6L3.4 9.3l6-.7z"/></svg>`;
+  }
+  return html;
 }
 
 function refreshGridItem(assetId) {
@@ -345,6 +619,7 @@ function refreshGridItem(assetId) {
 
   // Re-attach click listener
   newEl.addEventListener('click', () => {
+    state.focusedAssetId = assetId;
     if (state.mode === 'stack') {
       toggleStackSelection(assetId, newEl);
     } else {
@@ -352,30 +627,110 @@ function refreshGridItem(assetId) {
     }
   });
 
+  // Re-attach hover action listeners
+  attachHoverActions(newEl);
+
   applyGridFilters();
+  renderProgressRail();
 }
 
-// ── LIGHTBOX ──────────────────────────────────────────────────
+function attachHoverActions(el) {
+  el.querySelectorAll('.quick-btn').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const assetId = el.dataset.assetId;
+      const action = btn.dataset.action;
+      if (action === 'keep') recordDecision(assetId, 'pick');
+      else if (action === 'reject') recordDecision(assetId, 'reject');
+      else if (action === 'open') openLightbox(assetId);
+    });
+  });
+}
+
+// Attach hover actions after initial render
+function attachAllHoverActions() {
+  document.querySelectorAll('.grid-item').forEach(attachHoverActions);
+}
+
+// ── Grid focus management ──────────────────────────────────────
+function updateFocusRing() {
+  // Remove old focus
+  document.querySelectorAll('.grid-item.is-focused').forEach(el => el.classList.remove('is-focused'));
+  // Add new focus
+  if (state.focusedAssetId && !state.lightboxOpen) {
+    const el = document.querySelector(`.grid-item[data-asset-id="${state.focusedAssetId}"]`);
+    if (el) el.classList.add('is-focused');
+  }
+}
+
+function moveFocusInGrid(delta) {
+  const visible = getVisibleAssets();
+  if (visible.length === 0) return;
+
+  const curIdx = visible.indexOf(state.focusedAssetId);
+  let nextIdx;
+  if (curIdx === -1) {
+    nextIdx = 0;
+  } else {
+    nextIdx = Math.max(0, Math.min(visible.length - 1, curIdx + delta));
+  }
+
+  state.focusedAssetId = visible[nextIdx];
+  updateFocusRing();
+  ensureFocusVisible();
+}
+
+function ensureFocusVisible() {
+  if (!state.focusedAssetId) return;
+  const cont = $('grid-view');
+  const el = document.querySelector(`.grid-item[data-pid="${state.focusedAssetId}"]`);
+  if (!cont || !el) return;
+
+  const cr = cont.getBoundingClientRect();
+  const er = el.getBoundingClientRect();
+  if (er.top < cr.top + 70) {
+    cont.scrollTop -= (cr.top + 70 - er.top);
+  } else if (er.bottom > cr.bottom - 20) {
+    cont.scrollTop += (er.bottom - (cr.bottom - 20));
+  }
+}
+
+// ── LIGHTBOX ───────────────────────────────────────────────────
 function openLightbox(assetId) {
-  const idx = state.allAssets.indexOf(assetId);
+  const visible = getVisibleAssets();
+  const idx = visible.indexOf(assetId);
   if (idx === -1) return;
   state.lightboxIndex = idx;
   state.lightboxOpen = true;
+  state.focusedAssetId = assetId;
   $('lightbox').classList.remove('hidden');
+  $('keyboard-legend').style.display = 'none';
   renderLightbox();
 }
 
 function closeLightbox() {
   state.lightboxOpen = false;
   $('lightbox').classList.add('hidden');
+  renderKeyboardLegend();
+  updateFocusRing();
+  ensureFocusVisible();
 }
 
 function renderLightbox() {
   if (!state.lightboxOpen) return;
 
-  const assetId = state.allAssets[state.lightboxIndex];
+  const visible = getVisibleAssets();
+  if (visible.length === 0) { closeLightbox(); return; }
+
+  // Clamp index
+  if (state.lightboxIndex >= visible.length) state.lightboxIndex = visible.length - 1;
+  if (state.lightboxIndex < 0) state.lightboxIndex = 0;
+
+  const assetId = visible[state.lightboxIndex];
+  state.focusedAssetId = assetId;
   const decision = state.decisionMap[assetId] || null;
   const rating = state.ratingMap[assetId] || null;
+  const meta = state.assetMeta[assetId] || {};
 
   // Image
   const img = $('lb-image');
@@ -384,51 +739,130 @@ function renderLightbox() {
   img.onload = () => { img.style.opacity = '1'; };
   img.onerror = () => { img.style.opacity = '0.3'; };
 
-  // Progress — show position within visible assets
-  const visibleAssets = state.allAssets.filter(shouldShowAsset);
-  const visiblePos = visibleAssets.indexOf(assetId) + 1;
-  $('photo-progress').textContent = `${visiblePos} / ${visibleAssets.length}`;
+  // Filename
+  $('lb-filename').textContent = meta.originalFileName || assetId.substring(0, 12);
+
+  // Counter
+  $('lb-counter').textContent = `${state.lightboxIndex + 1} / ${visible.length}`;
 
   // Decision badge
   const badge = $('lb-decision-badge');
-  badge.className = 'lb-decision-badge' + (decision ? ` ${decision}` : '');
-  badge.textContent = decision ? decision.toUpperCase() : '';
-
-  // Stars
-  const starsEl = $('lb-stars');
-  starsEl.textContent = rating ? '★'.repeat(rating) : '';
+  if (decision) {
+    badge.className = 'lb-decision-badge ' + (decision === 'pick' ? 'pick' : 'reject');
+    badge.innerHTML = `${icon(decision === 'pick' ? 'check' : 'x', 14, 2.6)} ${decision === 'pick' ? 'KEEP' : 'REJECT'}`;
+  } else {
+    badge.className = 'lb-decision-badge';
+    badge.innerHTML = '';
+  }
 
   // Flash cleared
   $('lb-flash').className = 'lb-flash';
 
   // Nav buttons
   $('lb-prev').disabled = state.lightboxIndex === 0;
-  $('lb-next').disabled = state.lightboxIndex === state.allAssets.length - 1;
+  $('lb-next').disabled = state.lightboxIndex === visible.length - 1;
 
-  // Keyboard hints per mode
+  // Rating row
+  renderLightboxRating(rating);
+
+  // Filmstrip
+  renderFilmstrip(visible, state.lightboxIndex);
+
+  // Keyboard hints
   renderLightboxHints();
+}
+
+function renderLightboxRating(currentRating) {
+  const pill = $('lb-rating-pill');
+  let html = '';
+  for (let i = 1; i <= 5; i++) {
+    const active = currentRating && currentRating >= i;
+    html += `<button class="lb-star ${active ? 'active' : ''}" data-rating="${i}">
+      <svg width="20" height="20" viewBox="0 0 24 24" ${active ? 'fill="var(--star)" stroke="var(--star)"' : 'fill="none" stroke="var(--text-ghost)"'} stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M12 3l2.6 5.6 6 .7-4.4 4.1 1.2 6L12 16.9 6.6 19.4l1.2-6L3.4 9.3l6-.7z"/>
+      </svg>
+    </button>`;
+  }
+  pill.innerHTML = html;
+
+  // Attach star click handlers
+  pill.querySelectorAll('.lb-star').forEach(star => {
+    star.addEventListener('click', () => {
+      const visible = getVisibleAssets();
+      const assetId = visible[state.lightboxIndex];
+      const r = Number(star.dataset.rating);
+      const currentRating = state.ratingMap[assetId] || 0;
+      recordRating(assetId, currentRating === r ? 0 : r);
+    });
+  });
+}
+
+function renderFilmstrip(visible, activeIndex) {
+  const strip = $('filmstrip');
+  let html = '';
+
+  for (let i = 0; i < visible.length; i++) {
+    const id = visible[i];
+    const meta = state.assetMeta[id] || {};
+    const decision = state.decisionMap[id] || null;
+    const rating = state.ratingMap[id] || null;
+    const isActive = i === activeIndex;
+
+    // Aspect ratio for filmstrip thumb
+    let arStyle = '';
+    if (meta.width && meta.height && meta.width > 0 && meta.height > 0) {
+      arStyle = `aspect-ratio: ${meta.width}/${meta.height};`;
+    } else {
+      arStyle = 'aspect-ratio: 3/2;';
+    }
+
+    let overlays = '';
+    if (decision) {
+      overlays += `<div class="filmstrip-dot ${decision === 'pick' ? 'keep' : 'reject'}"></div>`;
+    }
+    if (rating && rating > 0) {
+      overlays += `<div class="filmstrip-stars">${'\u2605'.repeat(rating)}</div>`;
+    }
+
+    html += `
+      <div class="filmstrip-thumb ${isActive ? 'active' : ''}" data-index="${i}" style="${arStyle}">
+        <img src="/api/proxy/thumbnail/${id}" loading="lazy" alt="" />
+        ${overlays}
+      </div>
+    `;
+  }
+
+  strip.innerHTML = html;
+
+  // Attach click handlers
+  strip.querySelectorAll('.filmstrip-thumb').forEach(thumb => {
+    thumb.addEventListener('click', () => {
+      state.lightboxIndex = Number(thumb.dataset.index);
+      renderLightbox();
+    });
+  });
+
+  // Auto-center active thumbnail
+  requestAnimationFrame(() => {
+    const activeEl = strip.querySelector('.filmstrip-thumb.active');
+    if (activeEl) {
+      activeEl.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
+    }
+  });
 }
 
 function renderLightboxHints() {
   const hints = $('lb-hints');
-  if (state.mode === 'triage') {
-    hints.innerHTML = `
-      <span><kbd>P</kbd> Pick</span>
-      <span><kbd>X</kbd> Reject</span>
-      <span><kbd>←</kbd><kbd>→</kbd> Navigate</span>
-      <span><kbd>Esc</kbd> Close</span>
-    `;
-  } else if (state.mode === 'rate') {
-    hints.innerHTML = `
-      <span><kbd>1</kbd>–<kbd>5</kbd> Star</span>
-      <span><kbd>0</kbd> Clear rating</span>
-      <span><kbd>X</kbd> Reject</span>
-      <span><kbd>←</kbd><kbd>→</kbd> Navigate</span>
-      <span><kbd>Esc</kbd> Close</span>
-    `;
-  } else {
-    hints.innerHTML = `<span><kbd>Esc</kbd> Close</span>`;
+  let items = '';
+
+  if (state.mode === 'rate') {
+    items = `${legend('1\u20135', 'Rate')}${legend('0', 'Clear')}${legend('X', 'Reject')}`;
+  } else if (state.mode === 'cull') {
+    items = `${legend('P', 'Keep')}${legend('X', 'Reject')}${legend('U', 'Unset')}`;
   }
+
+  items += `${legend('\u2190 \u2192', 'Navigate')}${legend('\u21B5', 'Next scene')}${legend('Esc', 'Close')}`;
+  hints.innerHTML = items;
 }
 
 function shouldShowAsset(assetId) {
@@ -436,30 +870,60 @@ function shouldShowAsset(assetId) {
   if (state.filterShow === 'picked' && state.decisionMap[assetId] !== 'pick') return false;
   if (state.filterShow === 'unrated' && state.ratingMap[assetId]) return false;
   if (state.filterShow === 'rated' && !state.ratingMap[assetId]) return false;
+  if (state.filterShow === 'rejects' && state.decisionMap[assetId] !== 'reject') return false;
   return true;
 }
 
 function lbNavigate(delta) {
+  const visible = getVisibleAssets();
   let next = state.lightboxIndex + delta;
-  while (next >= 0 && next < state.allAssets.length) {
-    if (shouldShowAsset(state.allAssets[next])) {
-      state.lightboxIndex = next;
-      renderLightbox();
-      return;
-    }
-    next += delta;
+  if (next >= 0 && next < visible.length) {
+    state.lightboxIndex = next;
+    renderLightbox();
   }
+}
+
+// Scene navigation in lightbox
+function lbJumpToNextScene() {
+  const visible = getVisibleAssets();
+  const currentAssetId = visible[state.lightboxIndex];
+  const currentScene = state.sceneForAsset[currentAssetId];
+
+  // Find first frame of next scene
+  let j = state.lightboxIndex + 1;
+  while (j < visible.length && state.sceneForAsset[visible[j]] === currentScene) j++;
+  if (j < visible.length) {
+    state.lightboxIndex = j;
+    renderLightbox();
+  }
+}
+
+function lbJumpToPrevScene() {
+  const visible = getVisibleAssets();
+  const currentAssetId = visible[state.lightboxIndex];
+  const currentScene = state.sceneForAsset[currentAssetId];
+
+  // Go back to find a frame in a previous scene
+  let j = state.lightboxIndex - 1;
+  while (j >= 0 && state.sceneForAsset[visible[j]] === currentScene) j--;
+  if (j < 0) { state.lightboxIndex = 0; renderLightbox(); return; }
+
+  // Now find the first frame of that scene
+  const prevScene = state.sceneForAsset[visible[j]];
+  while (j > 0 && state.sceneForAsset[visible[j - 1]] === prevScene) j--;
+  state.lightboxIndex = j;
+  renderLightbox();
 }
 
 $('lb-prev').addEventListener('click', () => lbNavigate(-1));
 $('lb-next').addEventListener('click', () => lbNavigate(1));
 $('lb-close').addEventListener('click', closeLightbox);
 
-// ── Decision / Rating recording ───────────────────────────────
+// ── Decision / Rating recording ────────────────────────────────
 async function recordDecision(assetId, decision) {
   const prev = state.decisionMap[assetId];
   if (prev === decision) {
-    // Toggle off — remove decision
+    // Toggle off
     delete state.decisionMap[assetId];
     api('DELETE', '/api/decisions', {
       sessionId: state.currentSession.id,
@@ -512,25 +976,31 @@ async function recordRating(assetId, rating) {
   refreshGridItem(assetId);
 }
 
-// ── Stack mode ────────────────────────────────────────────────
+// ── Stack mode ─────────────────────────────────────────────────
 function toggleStackSelection(assetId, el) {
   if (state.stackSelection.has(assetId)) {
     state.stackSelection.delete(assetId);
-    el.classList.remove('stack-selected');
-    el.querySelector('.grid-check').innerHTML = '';
   } else {
     state.stackSelection.add(assetId);
-    el.classList.add('stack-selected');
-    const check = el.querySelector('.grid-check');
-    if (check) check.innerHTML = '&#10003;';
   }
+  refreshGridItem(assetId);
   updateStackActionBar();
+  renderKeyboardLegend();
 }
 
 function updateStackActionBar() {
   const count = state.stackSelection.size;
-  $('stack-selection-count').textContent = `${count} selected`;
+  $('stack-selection-count').innerHTML = `<b>${count}</b> selected`;
   $('btn-group-stack').disabled = count < 2;
+
+  // Show/hide the stack bar vs legend
+  if (count > 0) {
+    $('stack-action-bar').classList.remove('hidden');
+    $('keyboard-legend').style.display = 'none';
+  } else if (state.mode === 'stack') {
+    $('stack-action-bar').classList.remove('hidden');
+    $('keyboard-legend').style.display = '';
+  }
 }
 
 $('btn-group-stack').addEventListener('click', async () => {
@@ -548,6 +1018,9 @@ $('btn-group-stack').addEventListener('click', async () => {
       state.stackGroupMap[id] = group.id;
     }
 
+    const groupNum = state.stackGroups.length;
+    showToast(`Grouped ${assetIds.length} frames into stack ${groupNum}`);
+
     state.stackSelection.clear();
     updateStackActionBar();
     renderGrid();
@@ -562,13 +1035,14 @@ $('btn-clear-selection').addEventListener('click', () => {
   renderGrid();
 });
 
-// ── Keyboard handling ─────────────────────────────────────────
+// ── Keyboard handling ──────────────────────────────────────────
 document.addEventListener('keydown', function (e) {
   if (!screens.review.classList.contains('active')) return;
   if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT') return;
 
   if (state.lightboxOpen) {
-    const assetId = state.allAssets[state.lightboxIndex];
+    const visible = getVisibleAssets();
+    const assetId = visible[state.lightboxIndex];
 
     switch (e.key) {
       case 'Escape':
@@ -583,9 +1057,17 @@ document.addEventListener('keydown', function (e) {
         e.preventDefault();
         lbNavigate(1);
         break;
+      case 'Enter':
+        e.preventDefault();
+        if (e.shiftKey) {
+          lbJumpToPrevScene();
+        } else {
+          lbJumpToNextScene();
+        }
+        break;
       case 'p':
       case 'P':
-        if (state.mode === 'triage' || state.mode === 'rate') {
+        if (state.mode === 'cull' || state.mode === 'rate') {
           e.preventDefault();
           recordDecision(assetId, 'pick');
           lbNavigate(1);
@@ -596,6 +1078,20 @@ document.addEventListener('keydown', function (e) {
         e.preventDefault();
         recordDecision(assetId, 'reject');
         lbNavigate(1);
+        break;
+      case 'u':
+      case 'U':
+        if (state.mode === 'cull') {
+          e.preventDefault();
+          // Unset = remove decision
+          delete state.decisionMap[assetId];
+          api('DELETE', '/api/decisions', {
+            sessionId: state.currentSession.id,
+            assetId,
+          }).catch(() => {});
+          renderLightbox();
+          refreshGridItem(assetId);
+        }
         break;
       case '1': case '2': case '3': case '4': case '5':
         if (state.mode === 'rate') {
@@ -611,60 +1107,119 @@ document.addEventListener('keydown', function (e) {
         }
         break;
     }
+    return;
+  }
+
+  // Grid keyboard navigation
+  const k = e.key;
+
+  if (k === 'ArrowRight' || k === 'ArrowDown') {
+    e.preventDefault();
+    moveFocusInGrid(1);
+    return;
+  }
+  if (k === 'ArrowLeft' || k === 'ArrowUp') {
+    e.preventDefault();
+    moveFocusInGrid(-1);
+    return;
+  }
+
+  if (!state.focusedAssetId) return;
+  const focusedId = state.focusedAssetId;
+
+  if (k === 'Enter' || k === 'o' || k === 'O') {
+    e.preventDefault();
+    openLightbox(focusedId);
+    return;
+  }
+
+  if (state.mode === 'stack') {
+    if (k === ' ') {
+      e.preventDefault();
+      const el = document.querySelector(`.grid-item[data-asset-id="${focusedId}"]`);
+      if (el) toggleStackSelection(focusedId, el);
+    } else if (k === 'g' || k === 'G') {
+      e.preventDefault();
+      $('btn-group-stack').click();
+    }
+    return;
+  }
+
+  if (state.mode === 'rate') {
+    if (k >= '1' && k <= '5') { e.preventDefault(); recordRating(focusedId, Number(k)); return; }
+    if (k === '0') { e.preventDefault(); recordRating(focusedId, 0); return; }
+    if (k === 'x' || k === 'X') { e.preventDefault(); recordDecision(focusedId, 'reject'); return; }
+    return;
+  }
+
+  // Cull mode
+  if (k === 'p' || k === 'P') { e.preventDefault(); recordDecision(focusedId, 'pick'); }
+  else if (k === 'x' || k === 'X') { e.preventDefault(); recordDecision(focusedId, 'reject'); }
+  else if (k === 'u' || k === 'U') {
+    e.preventDefault();
+    delete state.decisionMap[focusedId];
+    api('DELETE', '/api/decisions', {
+      sessionId: state.currentSession.id,
+      assetId: focusedId,
+    }).catch(() => {});
+    refreshGridItem(focusedId);
+    renderProgressRail();
   }
 });
 
-// ── Review nav ────────────────────────────────────────────────
+// ── Review nav ─────────────────────────────────────────────────
 $('back-to-home').addEventListener('click', () => {
   closeLightbox();
   showScreen('home');
   loadSessions();
 });
 
-$('go-to-summary').addEventListener('click', showSummary);
-
-// ── SUMMARY SCREEN ────────────────────────────────────────────
+// ── SUMMARY SCREEN ─────────────────────────────────────────────
 function showSummary() {
   closeLightbox();
 
-  let picks = 0, rejects = 0, undecided = 0, rated = 0;
+  const counts = computeCounts();
 
-  for (const id of state.allAssets) {
-    const d = state.decisionMap[id];
-    if (d === 'pick') picks++;
-    else if (d === 'reject') rejects++;
-    else undecided++;
+  // Eyebrow
+  $('summary-eyebrow').textContent = state.currentSession.name;
 
-    if (state.ratingMap[id]) rated++;
+  // Stat tiles
+  const stats = [
+    { n: counts._picks, l: 'Kept', c: 'var(--keep)' },
+    { n: counts._rejects, l: 'Rejected', c: 'var(--reject)' },
+    { n: counts._undecided, l: 'Undecided', c: 'var(--text-dim)' },
+    { n: counts._rated, l: 'Rated', c: 'var(--star)' },
+    { n: counts._stacks, l: 'Stacks', c: 'var(--accent-text)' },
+    { n: 0, l: 'Edited', c: 'var(--accent-text)' },
+  ];
+
+  $('summary-stats').innerHTML = stats.map(s => `
+    <div class="stat-tile">
+      <div class="stat-tile-number mono" style="color: ${s.c}">${s.n}</div>
+      <div class="stat-tile-label">${s.l}</div>
+    </div>
+  `).join('');
+
+  // Commit row sub-details
+  $('opt-trash-sub').textContent = `${counts._rejects} photos \u2192 Immich trash (recoverable)`;
+  $('opt-ratings-sub').textContent = `${counts._rated} ratings to asset metadata`;
+  $('opt-stacks-sub').textContent = `${counts._stacks} manual groups, best frame as primary`;
+
+  // Reset commit state
+  $('commit-log').innerHTML = '';
+  if (state.currentSession._committed) {
+    $('commit-options').style.display = 'none';
+    $('commit-btn').disabled = false;
+    $('commit-btn').innerHTML = `Done`;
+    $('commit-btn').onclick = () => { showScreen('home'); loadSessions(); };
+    $('commit-log').innerHTML = `<div class="commit-log-inner"><div class="commit-log-done">Already committed. Immich is up to date.</div></div>`;
+  } else {
+    $('commit-options').style.display = '';
+    $('commit-btn').disabled = false;
+    $('commit-btn').innerHTML = `Commit to Immich ${icon('arrowR', 15)}`;
+    $('commit-btn').onclick = null;
   }
 
-  const stacks = state.stackGroups.length;
-
-  $('summary-stats').innerHTML = `
-    <div class="stat-box">
-      <div class="stat-number pick">${picks}</div>
-      <div class="stat-label">Picked</div>
-    </div>
-    <div class="stat-box">
-      <div class="stat-number reject">${rejects}</div>
-      <div class="stat-label">Rejected</div>
-    </div>
-    <div class="stat-box">
-      <div class="stat-number neutral">${undecided}</div>
-      <div class="stat-label">Undecided</div>
-    </div>
-    <div class="stat-box">
-      <div class="stat-number star">${rated}</div>
-      <div class="stat-label">Rated</div>
-    </div>
-    <div class="stat-box">
-      <div class="stat-number stack">${stacks}</div>
-      <div class="stat-label">Stacks</div>
-    </div>
-  `;
-
-  $('commit-result').className = 'commit-result hidden';
-  $('commit-btn').disabled = false;
   showScreen('summary');
 }
 
@@ -673,12 +1228,24 @@ $('back-to-review').addEventListener('click', () => {
 });
 
 $('commit-btn').addEventListener('click', async () => {
+  if (state.currentSession._committed) return;
   $('commit-btn').disabled = true;
-  showLoading('Committing to Immich...');
+  $('commit-btn').innerHTML = `<span class="spinner" style="width:15px;height:15px;border-width:2px;display:inline-block;vertical-align:middle;margin-right:6px;"></span> Committing\u2026`;
 
   const trashRejects = $('opt-trash-rejects').checked;
   const writeRatings = $('opt-write-ratings').checked;
   const createStacks = $('opt-create-stacks').checked;
+
+  const logEl = $('commit-log');
+  logEl.innerHTML = '<div class="commit-log" id="commit-log-inner"></div>';
+  const logInner = $('commit-log-inner');
+
+  // Hide options
+  $('commit-options').style.display = 'none';
+
+  function addLogLine(msg) {
+    logInner.innerHTML += `<div class="commit-log-line">${icon('check', 14, 2.4)} ${escHtml(msg)}</div>`;
+  }
 
   try {
     const result = await api('POST', `/api/sessions/${state.currentSession.id}/commit`, {
@@ -686,30 +1253,37 @@ $('commit-btn').addEventListener('click', async () => {
       writeRatings,
       createStacks,
     });
-    hideLoading();
 
-    const el = $('commit-result');
-    el.className = 'commit-result ' + (result.errors && result.errors.length ? 'error' : 'success');
-
-    const lines = [
-      `Trashed: ${result.assetsTrashed} photos`,
-      `Ratings written: ${result.ratingsWritten}`,
-      `Stacks created: ${result.stacksCreated}`,
-    ];
-    if (result.errors && result.errors.length) {
-      lines.push('', 'Errors:', ...result.errors);
+    if (trashRejects && result.assetsTrashed > 0) {
+      addLogLine(`Trashed ${result.assetsTrashed} rejects \u2192 Immich trash`);
     }
-    el.textContent = lines.join('\n');
-  } catch (err) {
-    hideLoading();
-    const el = $('commit-result');
-    el.className = 'commit-result error';
-    el.textContent = `Commit failed: ${err.message}`;
+    if (writeRatings && result.ratingsWritten > 0) {
+      addLogLine(`Wrote ${result.ratingsWritten} star ratings to metadata`);
+    }
+    if (createStacks && result.stacksCreated > 0) {
+      addLogLine(`Created ${result.stacksCreated} stacks`);
+    }
+    if (result.errors && result.errors.length) {
+      for (const err of result.errors) {
+        logInner.innerHTML += `<div class="commit-log-line" style="color: var(--reject)">${icon('x', 14, 2.4)} ${escHtml(err)}</div>`;
+      }
+    }
+
+    logInner.innerHTML += `<div class="commit-log-done">Done. Immich is up to date.</div>`;
+    $('commit-options').style.display = 'none';
+    state.currentSession._committed = true;
     $('commit-btn').disabled = false;
+    $('commit-btn').innerHTML = `Done`;
+    $('commit-btn').onclick = () => { showScreen('home'); loadSessions(); };
+
+  } catch (err) {
+    logInner.innerHTML += `<div class="commit-log-line" style="color: var(--reject)">${icon('x', 14, 2.4)} Commit failed: ${escHtml(err.message)}</div>`;
+    $('commit-btn').disabled = false;
+    $('commit-btn').innerHTML = `Retry ${icon('arrowR', 15)}`;
   }
 });
 
-// ── Utilities ─────────────────────────────────────────────────
+// ── Utilities ──────────────────────────────────────────────────
 function escHtml(str) {
   return String(str)
     .replace(/&/g, '&amp;')
@@ -724,5 +1298,21 @@ function fmtDate(isoStr) {
   return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
 }
 
-// ── Init ──────────────────────────────────────────────────────
+// ── Grid render post-processing (attach hover actions) ─────────
+const originalRenderGrid = renderGrid;
+const _renderGrid = renderGrid;
+
+// Use MutationObserver to attach hover actions after DOM update
+const gridObserver = new MutationObserver(() => {
+  attachAllHoverActions();
+});
+
+// ── Init ───────────────────────────────────────────────────────
+document.addEventListener('DOMContentLoaded', () => {
+  const grid = $('photo-grid');
+  if (grid) {
+    gridObserver.observe(grid, { childList: true, subtree: true });
+  }
+});
+
 loadSessions();

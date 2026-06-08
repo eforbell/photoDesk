@@ -1,0 +1,59 @@
+## Codebase Patterns
+- Express/CommonJS throughout, no TypeScript, no build step
+- SQLite via better-sqlite3 with WAL mode and foreign keys
+- Immich API proxied through /api/proxy/thumbnail/:assetId to keep API key server-side
+- Frontend is vanilla JS in public/ (app.js, styles.css, index.html)
+- State: decisionMap (pick/reject), ratingMap (1-5), stackGroups (manual), stackGroupMap (assetId -> groupId)
+- Scene clustering by fileCreatedAt time proximity (configurable threshold in seconds)
+- Lightbox navigation respects active filters (shouldShowAsset function)
+- DB tables: sessions, scenes, decisions, ratings, stack_groups
+- Immich endpoints: POST /api/search/metadata, GET /api/assets/:id/thumbnail, POST /api/stacks, DELETE /api/assets, PUT /api/assets/:id
+
+## 2026-06-07 — Feature #0: Foundation
+- Built initial prototype: Express backend + vanilla frontend
+- Immich client (search, thumbnail proxy, create stack, trash assets)
+- Scene clustering by time proximity
+- Single-pass pick/reject/skip UI
+
+## 2026-06-08 — Feature #0: Multi-pass Workflow
+- Reworked to three-pass model: Triage (pick/reject) -> Rate (1-5 stars) -> Stack (manual grouping)
+- Added ratings table, stack_groups table, updated decisions to pick/reject only
+- Grid view with scene separators replaces one-scene-at-a-time flow
+- Mode tabs (Triage/Rate/Stack) with filter controls
+- Lightbox navigation skips filtered-out photos
+- Auto-enable "Hide rejects" when switching to Rate mode
+- Commit screen with three independent checkboxes (trash/ratings/stacks)
+- Validated end-to-end against live Immich v2.7.5
+- **Learnings:**
+  - Immich v2.7.5 removed stackCount field; stack info is now a nested object with assetCount
+  - autoStackId in exif only covers burst photos (BurstID/BurstUUID/CameraBurstID/MediaUniqueID)
+  - PUT /api/assets/:id accepts rating field for star ratings
+  - Upload new asset + stack = non-destructive editing workflow
+---
+
+## 2026-06-07 — Feature #1: Visual System + Workspace Redesign
+- Full styles.css rewrite with OKLCH design tokens from theme.css (neutrals, accent, semantic, typography, radii, shadows, motion)
+- Added Google Fonts link for Hanken Grotesk (400/500/600/700) + JetBrains Mono (400/500/600)
+- ProgressRail replaces flat mode tabs: connected Cull -> Rate -> Stack -> Commit sequence with status dots, connector lines, count chips
+- Topbar restructured as 3-column grid: Home + session name/meta (left), rail (center), filters (right). Summary button removed; Commit is in rail.
+- Scene headers show "Scene N + HH:MM + N frames" with horizontal rule divider
+- Grid uses flex-wrap with aspect-ratio-aware thumbnails from Immich asset width/height
+- Backend expanded: POST /sessions stores [{id, width, height, originalFileName, fileCreatedAt}] in scenes.asset_ids JSON (was just IDs)
+- GET /sessions/:id/scenes returns `assets` array alongside `asset_ids` for backward compat with old sessions
+- Thumbnail restyling: focus ring (accent + glow), keep/reject outlines + status badges, reject scrim overlay, stars with gradient, stack checkbox, hover quick-action buttons
+- Pass hint strip: centered icon + hint text per mode below topbar
+- Keyboard legend: bottom bar with pass-specific shortcuts, updates per mode and lightbox state
+- Lightbox redesigned: bg-deep background, header with close/filename/counter, large circular nav buttons, decision badge on image, interactive star rating row
+- Filmstrip: 64px-tall horizontal scrollable strip in lightbox, aspect-ratio-aware thumbs, active ring + auto-center, status dots + star counts
+- Grid keyboard navigation: arrow keys move focus, Enter/O opens lightbox, pass-specific keys work on focused item, auto-scroll to keep focus visible
+- Lightbox Enter/Shift+Enter for next/prev scene jumping
+- Toast system: fixed bottom-center, auto-dismiss 2.4s, shown on stack group creation
+- Summary/Commit screen restyled: eyebrow session name, stat tile grid (3x2), commit rows with colored dots + sub-details, live progress log, disabled "Upload edited" placeholder row
+- **Learnings:**
+  - Immich search/metadata response includes exifInfo.exifImageWidth and exifInfo.exifImageHeight for aspect ratios
+  - Storing full asset metadata in scenes JSON column avoids schema migration and enables backward compat
+  - OKLCH colors require modern browsers (Chrome 111+, Safari 15.4+, Firefox 113+) — acceptable for self-hosted tool
+  - MutationObserver on the grid container auto-attaches hover action event listeners after innerHTML updates
+  - The `data-pid` attribute on grid items enables focus tracking by asset ID (same pattern as design prototype)
+  - Mode renamed from 'triage' to 'cull' to match the design's naming convention
+---

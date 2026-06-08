@@ -1,0 +1,31 @@
+{
+  "branchName": "feature/4-commit-hardening",
+  "projectName": "PhotoDesk",
+  "description": "Harden the commit pipeline to prevent library corruption. Add dry-run mode, per-action progress reporting, error recovery, idempotency guards, and the 'Upload edited versions' commit action. The commit screen becomes a careful, transparent process that shows exactly what will happen before it happens, reports each step live, and handles partial failures gracefully.",
+  "designReference": "design/design_handoff_photodesk/shell.jsx (Summary component), design/design_handoff_photodesk/README.md Section 5 (Commit/Summary).",
+  "principles": [
+    "No silent failures: every Immich API call's result is reported to the user",
+    "Idempotent: re-running commit does not duplicate stacks, re-trash already-trashed assets, or re-upload already-uploaded edits",
+    "Recoverable: partial failures leave the system in a known state. The user can re-run just the failed actions.",
+    "Transparent: the user sees exactly what will happen before clicking Commit",
+    "Careful: rejects go to Immich trash (recoverable), not permanent delete. Always soft-delete."
+  ],
+  "stories": [
+    "CH-001: Dry-run mode — POST /api/sessions/:id/commit?dryRun=true returns what WOULD happen without executing. Show counts in the commit screen before the user clicks.",
+    "CH-002: Per-action progress reporting — commit endpoint streams progress (or returns step-by-step). Frontend shows a live log: 'Trashing 19 rejects... done ✓', 'Writing 15 ratings... done ✓', etc.",
+    "CH-003: Idempotency for trash — check if assets are already trashed before attempting DELETE. Track trashed asset IDs in a committed_actions table. Skip already-trashed assets on re-commit.",
+    "CH-004: Idempotency for stacks — track which stack groups have been committed (committed_stack_group_id). Skip already-committed groups on re-commit.",
+    "CH-005: Idempotency for ratings — ratings are idempotent by nature (PUT is safe to repeat). Track to avoid unnecessary API calls.",
+    "CH-006: Idempotency for edited uploads — track uploaded edit asset IDs. Skip already-uploaded edits on re-commit.",
+    "CH-007: Error recovery UI — if commit partially fails, show which actions succeeded and which failed. Allow re-running just the failed actions.",
+    "CH-008: Commit confirmation dialog — before executing, show a summary of destructive actions ('This will trash 19 photos in Immich. This is recoverable from Immich's trash.') with a confirm button.",
+    "CH-009: Session committed state — mark session as committed, record committed_at timestamp, store commit results (counts, errors) for the recent sessions display."
+  ],
+  "researchNeeded": [
+    "Immich bulk operations: does DELETE /api/assets handle already-trashed IDs gracefully (no error) or does it fail?",
+    "Immich rating writes: does PUT /api/assets/:id with same rating value cause any side effects (updated_at change)?",
+    "Immich stack creation: what happens if you POST /api/stacks with assets that are already in a stack? (Merge behavior per the API docs, but need to verify)"
+  ],
+  "status": "planned",
+  "detailLevel": "outline — will be expanded after Features #1-3 are shipped and real-world commit patterns are observed"
+}

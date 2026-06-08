@@ -1,0 +1,207 @@
+{
+  "branchName": "feature/2-library-discover",
+  "projectName": "PhotoDesk",
+  "description": "Replace the manual session creation form with a discovery-first Library screen. PhotoDesk automatically surfaces un-triaged photo batches from Immich, shows a calendar heatmap for browsing by date density, and lets the user create sessions from suggested batches or custom date range selections. This makes the tool feel connected to the library rather than requiring the user to conjure up date ranges from memory.",
+  "designReference": "design/design_handoff_photodesk/library.jsx — full component reference. design/design_handoff_photodesk/README.md Section 1 (Library/Discover).",
+  "principles": [
+    "Discovery over configuration — surface what needs attention instead of asking for inputs",
+    "Immich is the source of truth — PhotoDesk tracks what it has already processed, not what Immich should look like",
+    "Responsive and fast — the library view should feel instant even with thousands of assets",
+    "Accurate un-triaged detection — only count assets not yet processed by any committed session",
+    "Calendar heatmap is a browsing tool, not a chart — click/drag to create sessions naturally"
+  ],
+  "techStack": {
+    "backend": "Express routes in src/routes/api.js, new src/library.js module for aggregation logic",
+    "database": "SQLite: new processed_assets table, new day-density query, suggested batch clustering",
+    "frontend": "Vanilla JS in public/, new library screen markup in index.html",
+    "immichApi": "POST /api/search/metadata for day-level counts and batch detection"
+  },
+  "dataModel": {
+    "processedAssets": {
+      "description": "Track which Immich asset IDs have been processed by a committed session. This is the diff engine: library total minus processed = un-triaged.",
+      "schema": "CREATE TABLE IF NOT EXISTS processed_assets (asset_id TEXT PRIMARY KEY, session_id INTEGER REFERENCES sessions(id), committed_at TEXT NOT NULL DEFAULT (datetime('now')))",
+      "population": "On commit, insert all non-rejected asset IDs from the session (picks + undecided + rated). Rejects are trashed in Immich so they leave the library naturally.",
+      "note": "Do NOT track rejects here — they are removed from Immich. Only track assets that remain in the library after commit."
+    },
+    "dayDensity": {
+      "description": "Per-day photo counts for the heatmap. Computed by querying Immich for asset counts per day and cross-referencing processed_assets.",
+      "fields": "date (YYYY-MM-DD), totalCount, untriagedCount",
+      "approach": "Fetch all assets from Immich (paginated), group by date(fileCreatedAt), diff against processed_assets to compute untriaged counts. Cache in SQLite for fast repeated access with a TTL or manual refresh."
+    },
+    "suggestedBatches": {
+      "description": "Clusters of consecutive un-triaged days that form natural session candidates (e.g., a 3-day trip).",
+      "algorithm": "Walk day-density data chronologically. Group consecutive days that have un-triaged photos with gaps <= 1 day (allow a single empty day between active days). Each cluster becomes a suggested batch with: date range, total photos, estimated scene count, preview asset IDs.",
+      "note": "Estimated scene count = total photos / average photos per scene (use 4 as heuristic, or compute from time gaps if asset timestamps are available)."
+    }
+  },
+  "userStories": [
+    {
+      "id": "LD-001",
+      "title": "Processed assets tracking table and commit integration",
+      "acceptanceCriteria": [
+        "Add processed_assets table to db.js schema (asset_id TEXT PK, session_id INT FK, committed_at TEXT)",
+        "On session commit (POST /api/sessions/:id/commit), after all Immich operations succeed, insert all non-rejected asset IDs into processed_assets",
+        "Non-rejected = assets where decision is 'pick' OR decision is NULL (undecided) — i.e., everything that wasn't explicitly rejected",
+        "Insert uses INSERT OR IGNORE to handle re-commits gracefully",
+        "Add GET /api/stats endpoint returning: { totalLibrary, totalProcessed, totalUntriaged }",
+        "totalLibrary: count of assets currently in Immich (from a lightweight search/count call)",
+        "totalProcessed: count of rows in processed_assets",
+        "totalUntriaged: totalLibrary - totalProcessed (approximate)"
+      ],
+      "priority": 1,
+      "passes": false,
+      "notes": "This is the foundation of the discovery system. The approximation (total - processed) is good enough — it won't account for assets deleted outside PhotoDesk, but that's fine for a home tool. A full sync (checking each processed ID still exists in Immich) can be a future optimization."
+    },
+    {
+      "id": "LD-002",
+      "title": "Day-density aggregation endpoint",
+      "acceptanceCriteria": [
+        "Add GET /api/library/density endpoint",
+        "Fetches all IMAGE assets from Immich (paginated via fetchAllAssets)",
+        "Groups by date (YYYY-MM-DD) extracted from fileCreatedAt",
+        "Cross-references processed_assets to compute per-day untriaged counts",
+        "Returns array: [{ date, count, untriaged, untriagedCount }] where untriaged is a boolean (any un-triaged photos on this day)",
+        "Results cached in SQLite (density_cache table: computed_at timestamp, data JSON) with 1-hour TTL",
+        "Add GET /api/library/density?refresh=true to force recompute",
+        "Performance: the full asset fetch is the bottleneck — for 10K assets this takes ~5-10 seconds. Show loading state on frontend. Cache makes subsequent loads instant."
+      ],
+      "priority": 2,
+      "passes": false,
+      "notes": "This is the most expensive operation in PhotoDesk. The cache is essential. Consider paginating the Immich fetch more aggressively (1000 per page). The current fetchAllAssets caps at 50 pages (12,500 assets) — may need to increase for large libraries. For very large libraries (50K+), consider fetching only the last N months rather than everything."
+    },
+    {
+      "id": "LD-003",
+      "title": "Suggested batches clustering",
+      "acceptanceCriteria": [
+        "Add GET /api/library/suggestions endpoint",
+        "Consumes day-density data (from cache or fresh compute)",
+        "Clusters consecutive un-triaged days into suggested batches",
+        "Clustering: walk days chronologically, group consecutive days with untriagedCount > 0, allow gap of 1 empty day between active days",
+        "Each suggestion: { name (auto-generated, e.g., 'Jan 3-4'), dateFrom, dateTo, totalPhotos, estimatedScenes, previewAssetIds (first 4 asset IDs for mosaic), dayCount, when (relative time, e.g., '5 days ago') }",
+        "Auto-name: if single day, use date (e.g., 'Jun 7'); if multi-day, use range (e.g., 'Jun 7-9')",
+        "Preview asset IDs: pick the first 4 un-triaged asset IDs from the batch's date range (requires a lightweight Immich query or use cached data)",
+        "Sort suggestions newest-first",
+        "Return max 6 suggestions"
+      ],
+      "priority": 3,
+      "passes": false,
+      "notes": "The auto-naming is a UX detail the user specifically wanted — replacing the manual text input with intelligent defaults. The name is editable before session creation (see LD-006)."
+    },
+    {
+      "id": "LD-004",
+      "title": "Library screen — hero section and stats",
+      "acceptanceCriteria": [
+        "New screen (screen-library) replaces the current home screen as the entry point",
+        "Sticky translucent header: PhotoDesk wordmark (CSS text, not image) left, 'Immich · connected' pill right (green dot when API key is configured)",
+        "Hero section: h1 'Your library' (30px/700) + subtitle explaining PhotoDesk's purpose",
+        "Right-aligned stat cards cluster: 3 cards showing In Library / Un-triaged (accent-highlighted) / Active Days counts",
+        "Stats fetched from GET /api/stats on page load",
+        "Stat card style: --panel background, mono 24px/700 number, 10.5px uppercase label",
+        "Content column centered, max-width 1180px, padding 40px 36px 70px",
+        "Subtle radial background glow top-right in accent hue (CSS radial-gradient, decorative only)"
+      ],
+      "priority": 4,
+      "passes": false,
+      "notes": "The library screen is the new 'home'. The old session creation form functionality migrates to the calendar selection panel (LD-006). Past sessions list stays as 'Recent sessions' section."
+    },
+    {
+      "id": "LD-005",
+      "title": "Ready to cull — suggested batch cards",
+      "acceptanceCriteria": [
+        "Section below hero: 'Ready to cull' header with subtitle 'Un-triaged batches, newest first'",
+        "Responsive grid of SuggestedCard components: repeat(auto-fill, minmax(280px, 1fr)), gap 16",
+        "Each card: 2x2 photo mosaic (aspect 16/10, 2px gaps between photos) from preview asset IDs via thumbnail proxy",
+        "Absolute-positioned 'Un-triaged' pill on mosaic (accent color, blurred dark background)",
+        "Card body: batch name (15/600), relative time (mono 11px ghost), metadata row (date span, N photos, ~N scenes)",
+        "Full-width 'Start culling ->' button that fills with accent on card hover",
+        "Card hover: lift translateY(-2px), border brightens",
+        "Clicking 'Start culling' creates a session with the batch's date range and default 30s threshold, then navigates to the workspace",
+        "Empty state: if no suggestions, show a message like 'All caught up! No un-triaged batches found.'"
+      ],
+      "priority": 5,
+      "passes": false,
+      "notes": "The mosaic uses the thumbnail proxy endpoint that already exists. If a preview asset ID fails to load, show a gradient fallback. The 'Start culling' action reuses the existing POST /api/sessions endpoint."
+    },
+    {
+      "id": "LD-006",
+      "title": "Calendar heatmap — rendering and interaction",
+      "acceptanceCriteria": [
+        "Section: 'Browse by date' header with subtitle 'Click a day or drag across several · brighter = more photos'",
+        "GitHub-style calendar heatmap: month blocks in a wrapping row, gap 30",
+        "Each month: label ('Oct '25' format, mono year) over a grid (7 rows for days of week, auto-flow columns)",
+        "Cell size: 15x15px, gap 4px, border-radius 3.5px",
+        "Cell color: un-triaged days use accent-blue lightness ramp (4 levels by photo count: <10/10-29/30-59/60+), reviewed days use neutral gray ramp (4 levels), empty days use --panel-2",
+        "Legend below: 'Needs culling' (blue dot) · 'Reviewed' (gray dot) · 'Less -> More' ramp",
+        "Interaction: mousedown starts range selection, mouseenter while dragging extends range, mouseup finalizes. Single click = one-day range.",
+        "Selected cells: accent outline (1.5px solid) + glow (0 0 0 3px accent-dim)",
+        "Hover tooltip: fixed position, shows date + 'N photos · un-triaged/reviewed' or 'no photos'",
+        "Show the most recent 4-6 months of data (scroll or expand for more)"
+      ],
+      "priority": 6,
+      "passes": false,
+      "notes": "The heatmap interaction is the most complex frontend piece. Reference library.jsx MonthHeat component for the exact grid layout and heatColor function. The drag selection needs careful event handling (mousedown -> track drag state -> mouseup anywhere on window)."
+    },
+    {
+      "id": "LD-007",
+      "title": "Calendar selection panel — session creation from date range",
+      "acceptanceCriteria": [
+        "When a date range is selected on the heatmap, a SelectionPanel appears below the heatmap",
+        "Panel contents: auto-generated session name (e.g., 'Jun 7' or 'Jun 7-9'), photo count for the range, day count, un-triaged count (in accent)",
+        "Small thumbnail preview strip: first 6 asset thumbnails from the selected range + '+N' chip if more",
+        "Editable session name input (default = auto-generated name, user can override)",
+        "Scene gap slider: 5-120s range, default 30s (same as current threshold slider)",
+        "Primary button: 'Start session ->' creates session and navigates to workspace",
+        "X button to clear the selection and dismiss the panel",
+        "Panel styled as a raised card (--panel background, --border, --r-lg radius, --shadow-2)"
+      ],
+      "priority": 7,
+      "passes": false,
+      "notes": "This replaces the old home screen form. The auto-name is computed from the selected date range. Thumbnail previews require a lightweight fetch of asset IDs for the date range — could be a new endpoint or reuse the existing search filtered by date."
+    },
+    {
+      "id": "LD-008",
+      "title": "Recent sessions list",
+      "acceptanceCriteria": [
+        "Section below heatmap: 'Recent sessions' header with subtitle 'Pick up where you left off'",
+        "Compact row layout for each past session",
+        "Each row: icon tile (green check for committed, accent spinner for in-progress), session name, mono metadata (N photos, N scenes, date)",
+        "Right side: committed sessions show 'N kept N cut' in green/red, in-progress sessions show 'Resume ->' pill button",
+        "Clicking a committed session could open a read-only summary (future), clicking in-progress navigates to workspace",
+        "Sessions fetched from GET /api/sessions (already exists)",
+        "Add a 'committed' flag to sessions table (set to true after successful commit)"
+      ],
+      "priority": 8,
+      "passes": false,
+      "notes": "Needs a minor DB change: add 'committed' boolean column to sessions table (default false, set true on commit). The committed stats (kept/cut counts) can be derived from the decisions table."
+    },
+    {
+      "id": "LD-009",
+      "title": "Immich connection indicator and error handling",
+      "acceptanceCriteria": [
+        "Header pill shows Immich connection status: green dot + 'connected' when API responds, red dot + 'disconnected' when not",
+        "On library load, make a lightweight Immich API call to verify connectivity (e.g., a search with size:1)",
+        "If Immich is unreachable: show the header pill as disconnected, disable 'Start culling' buttons, show a helpful message",
+        "If API key is missing: show a configuration message with instructions to set IMMICH_API_KEY in .env",
+        "Add GET /api/health endpoint that checks Immich connectivity and returns { immich: 'connected' | 'disconnected', apiKeySet: true | false }"
+      ],
+      "priority": 9,
+      "passes": false,
+      "notes": "This is a small but important UX touch. The user has Immich on a different machine — network issues will happen. Clear feedback prevents confusion."
+    }
+  ],
+  "riskAssessment": {
+    "high": [
+      "Day-density computation for large libraries (10K+ assets) is slow: mitigate with caching + loading states. The existing fetchAllAssets has a 50-page cap (12,500 assets) — may need to increase or use a date-windowed approach for very large libraries.",
+      "Un-triaged accuracy: processed_assets tracking only covers committed sessions. If a user creates a session but never commits, those assets remain un-triaged. This is correct behavior but may confuse users. Consider adding a note in the UI."
+    ],
+    "medium": [
+      "Calendar heatmap drag selection: cross-browser event handling (mousedown/mouseenter/mouseup) needs testing. Mobile doesn't support drag — touch users would tap individual days.",
+      "Suggested batch auto-naming: date formatting across locales. Use explicit format (Jan 3-4) rather than locale-dependent toLocaleDateString.",
+      "Preview thumbnails for suggested cards: requires fetching some asset IDs per batch. Batch this to avoid N+1 API calls."
+    ],
+    "low": [
+      "Heatmap cell count thresholds (<10/10-29/30-59/60+) may need tuning per library size",
+      "Session name auto-generation for date ranges spanning months (Dec 30 - Jan 2)"
+    ]
+  }
+}

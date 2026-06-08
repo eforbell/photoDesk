@@ -4,6 +4,9 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>PhotoDesk</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
@@ -56,17 +59,21 @@
 
   <!-- REVIEW SCREEN -->
   <div id="screen-review" class="screen">
+    <!-- TOPBAR: 3-column grid -->
     <div class="review-topbar">
       <div class="topbar-left">
-        <button class="btn btn-ghost btn-sm" id="back-to-home">← Home</button>
-        <span id="session-name-display" class="session-name-label"></span>
+        <button class="btn btn-ghost btn-sm" id="back-to-home">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11l9-7 9 7"/><path d="M5 10v9h14v-9"/></svg>
+          Home
+        </button>
+        <div class="topbar-left-info">
+          <span id="session-name-display" class="session-name-label"></span>
+          <div id="session-meta-display" class="session-meta mono"></div>
+        </div>
       </div>
 
-      <div class="mode-tabs">
-        <button class="mode-tab active" data-mode="triage" id="tab-triage">Triage</button>
-        <button class="mode-tab" data-mode="rate" id="tab-rate">Rate</button>
-        <button class="mode-tab" data-mode="stack" id="tab-stack">Stack</button>
-      </div>
+      <!-- PROGRESS RAIL (center) -->
+      <nav id="progress-rail" class="progress-rail"></nav>
 
       <div class="topbar-right">
         <div class="filter-controls">
@@ -76,78 +83,143 @@
           </label>
           <select id="filter-show" class="filter-select">
             <option value="all">All</option>
-            <option value="picked">Picked</option>
-            <option value="unrated">Unrated</option>
+            <option value="picked">Picks</option>
             <option value="rated">Rated</option>
+            <option value="unrated">Unrated</option>
+            <option value="rejects">Rejects</option>
           </select>
         </div>
-        <button class="btn btn-commit btn-sm" id="go-to-summary">Summary</button>
       </div>
     </div>
+
+    <!-- PASS HINT STRIP -->
+    <div id="pass-hint" class="pass-hint-strip"></div>
 
     <!-- GRID VIEW -->
     <div id="grid-view" class="grid-view">
       <div id="photo-grid" class="photo-grid"></div>
     </div>
 
+    <!-- KEYBOARD LEGEND (bottom) -->
+    <div id="keyboard-legend" class="keyboard-legend"></div>
+
     <!-- LIGHTBOX -->
     <div id="lightbox" class="lightbox hidden">
-      <button class="lb-close" id="lb-close" aria-label="Close lightbox">&#x2715;</button>
-      <button class="lb-nav lb-prev" id="lb-prev" aria-label="Previous photo">&#8249;</button>
+      <div class="lb-header">
+        <div class="lb-header-left">
+          <button class="lb-close" id="lb-close" aria-label="Close lightbox">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
+          </button>
+          <span id="lb-filename" class="lb-filename"></span>
+          <span id="lb-counter" class="lb-counter"></span>
+        </div>
+        <div class="lb-header-right">
+          <!-- Edit button placeholder for Phase 3 -->
+        </div>
+      </div>
 
-      <div class="lb-main">
+      <div class="lb-stage">
+        <button class="lb-nav lb-prev" id="lb-prev" aria-label="Previous photo">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
+        </button>
+
         <div class="lb-image-wrap">
           <img id="lb-image" src="" alt="Photo" />
           <div class="lb-flash" id="lb-flash"></div>
           <div class="lb-decision-badge" id="lb-decision-badge"></div>
-          <div class="lb-stars" id="lb-stars"></div>
         </div>
-        <div class="lb-meta">
-          <span id="photo-progress"></span>
-        </div>
+
+        <button class="lb-nav lb-next" id="lb-next" aria-label="Next photo">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg>
+        </button>
       </div>
 
-      <button class="lb-nav lb-next" id="lb-next" aria-label="Next photo">&#8250;</button>
+      <!-- Rating row -->
+      <div class="lb-rating-row">
+        <div class="lb-rating-pill" id="lb-rating-pill"></div>
+      </div>
 
-      <div class="lb-hints" id="lb-hints"></div>
+      <!-- Filmstrip -->
+      <div id="filmstrip" class="filmstrip"></div>
+
+      <!-- Lightbox keyboard legend -->
+      <div id="lb-hints" class="lb-hints"></div>
     </div>
 
     <!-- STACK MODE: group action bar -->
     <div id="stack-action-bar" class="stack-action-bar hidden">
-      <span id="stack-selection-count">0 selected</span>
-      <button class="btn btn-primary btn-sm" id="btn-group-stack" disabled>Group as Stack</button>
-      <button class="btn btn-ghost btn-sm" id="btn-clear-selection">Clear</button>
+      <span id="stack-selection-count"><b>0</b> selected</span>
+      <div class="stack-bar-actions">
+        <button class="btn btn-ghost btn-sm" id="btn-clear-selection">Clear</button>
+        <button class="btn btn-primary btn-sm" id="btn-group-stack" disabled>
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l9 5-9 5-9-5 9-5z"/><path d="M3 13l9 5 9-5"/></svg>
+          Group as stack
+          <span class="kbd">G</span>
+        </button>
+      </div>
     </div>
   </div>
 
   <!-- SUMMARY SCREEN -->
   <div id="screen-summary" class="screen">
     <div class="summary-wrap">
-      <h2>Session Summary</h2>
+      <div id="summary-eyebrow" class="summary-eyebrow"></div>
+      <h2>Commit to Immich</h2>
       <div id="summary-stats" class="summary-stats"></div>
 
-      <div class="commit-options">
-        <h3>What to commit:</h3>
-        <label class="checkbox-label">
-          <input type="checkbox" id="opt-trash-rejects" checked />
-          Trash rejects in Immich
-        </label>
-        <label class="checkbox-label">
-          <input type="checkbox" id="opt-write-ratings" checked />
-          Write star ratings to Immich
-        </label>
-        <label class="checkbox-label">
-          <input type="checkbox" id="opt-create-stacks" checked />
-          Create stacks in Immich
-        </label>
+      <div id="commit-options">
+        <div class="commit-section-title">What to push</div>
+        <div class="commit-rows">
+          <label class="commit-row">
+            <input type="checkbox" id="opt-trash-rejects" checked />
+            <span class="commit-row-dot" style="background: var(--reject)"></span>
+            <div class="commit-row-info">
+              <div class="commit-row-title">Trash rejects</div>
+              <div class="commit-row-sub" id="opt-trash-sub"></div>
+            </div>
+          </label>
+          <label class="commit-row">
+            <input type="checkbox" id="opt-write-ratings" checked />
+            <span class="commit-row-dot" style="background: var(--star)"></span>
+            <div class="commit-row-info">
+              <div class="commit-row-title">Write star ratings</div>
+              <div class="commit-row-sub" id="opt-ratings-sub"></div>
+            </div>
+          </label>
+          <label class="commit-row">
+            <input type="checkbox" id="opt-create-stacks" checked />
+            <span class="commit-row-dot" style="background: var(--accent-text)"></span>
+            <div class="commit-row-info">
+              <div class="commit-row-title">Create stacks</div>
+              <div class="commit-row-sub" id="opt-stacks-sub"></div>
+            </div>
+          </label>
+          <label class="commit-row" style="opacity: 0.4; pointer-events: none;">
+            <input type="checkbox" disabled />
+            <span class="commit-row-dot" style="background: var(--accent-text)"></span>
+            <div class="commit-row-info">
+              <div class="commit-row-title">Upload edited versions</div>
+              <div class="commit-row-sub">0 new assets, stacked over originals</div>
+            </div>
+          </label>
+        </div>
       </div>
 
+      <div id="commit-log"></div>
+
       <div class="summary-actions">
-        <button class="btn btn-ghost" id="back-to-review">Back to Review</button>
-        <button class="btn btn-primary" id="commit-btn">Commit to Immich</button>
+        <button class="btn btn-ghost" id="back-to-review">Back to review</button>
+        <button class="btn btn-primary" id="commit-btn">
+          Commit to Immich
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+        </button>
       </div>
-      <div id="commit-result" class="commit-result hidden"></div>
     </div>
+  </div>
+
+  <!-- TOAST -->
+  <div id="toast-container" class="toast-container">
+    <div id="toast" class="toast hidden"></div>
   </div>
 
   <div id="loading-overlay" class="loading-overlay hidden">
