@@ -1665,27 +1665,33 @@ input.suggestion-name:focus {
   position: relative;
   max-width: 100%;
   max-height: 100%;
-  width: min(100%, 1100px);
+  background: #000;
   overflow: hidden;
   border-radius: 2px;
   box-shadow: var(--shadow-3);
-  transition: aspect-ratio 0.25s var(--ease);
+  transition: width 0.2s var(--ease), height 0.2s var(--ease);
 }
 .editor-image-frame img {
   width: 100%;
   height: 100%;
   display: block;
-  object-fit: cover;
+  object-fit: contain;
 }
 .editor-image-overlay,
 .editor-thirds {
   position: absolute;
-  inset: 0;
   width: 100%;
   height: 100%;
   pointer-events: none;
 }
+.editor-image-overlay { inset: 0; }
 .editor-temp-overlay { mix-blend-mode: soft-light; }
+.editor-thirds {
+  z-index: 2;
+  overflow: visible;
+  border: 1px solid rgba(255,255,255,0.82);
+  box-shadow: 0 0 0 9999px rgba(0,0,0,0.46);
+}
 .editor-thirds path {
   fill: none;
   stroke: rgba(255,255,255,0.38);
@@ -1835,7 +1841,7 @@ input.suggestion-name:focus {
   }
   .editor-header-file > span { display: none; }
   .editor-stage { min-height: 40vh; padding: 4px 16px 18px; }
-  .editor-image-frame { width: 100%; max-height: 42vh; }
+  .editor-image-frame { max-width: 100%; max-height: 42vh; }
   .editor-panel {
     width: 100%;
     min-height: 48vh;

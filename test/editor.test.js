@@ -7,6 +7,7 @@ const {
 } = require('../src/editor');
 const {
   adjustmentFilter,
+  containSize,
   cropForAspect,
   isNeutralEdit,
   normalizeAdjustments,
@@ -96,5 +97,20 @@ test('aspect selection creates a centered normalized crop', () => {
     y: 0,
     width: 0.7430083144368859,
     height: 1,
+  });
+});
+
+test('fits portrait and landscape frames entirely inside the editor stage', () => {
+  assert.deepEqual(containSize(1000, 700, 3 / 4, 1100), {
+    width: 525,
+    height: 700,
+  });
+  assert.deepEqual(containSize(1000, 700, 3 / 2, 1100), {
+    width: 1000,
+    height: 666.6666666666666,
+  });
+  assert.deepEqual(containSize(1600, 900, 16 / 9, 1100), {
+    width: 1100,
+    height: 618.75,
   });
 });

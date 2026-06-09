@@ -141,3 +141,12 @@
   - Existing stacks should be extended through Immich's asset-copy stack association instead of recreated around one member.
   - `uploaded` is still a locally renderable state; preview routes and browser filters must treat it like `ready`.
 ---
+
+## 2026-06-09 — Feature #3 Editor: Contained Preview Follow-up
+- Corrected the editor viewport so opening Adjust or Crop never converts a portrait source into a clipped landscape preview.
+- The stage now calculates a contain-fit from both available width and height, preserves the source aspect ratio, and uses black stage padding around unused space.
+- Crop ratios now render as a shaded normalized selection with a rule-of-thirds grid over the complete source frame instead of changing the image wrapper ratio and relying on `object-fit: cover`.
+- Added regression coverage for portrait, landscape, and max-width contain geometry.
+- Browser-validated the reported 3:4 JPEG at desktop and 390×844, including a 1:1 crop selection. Visual verdict: 98/100.
+- **Learning:** Crop intent and preview viewport are separate concerns; the viewport should remain source-faithful while the crop rectangle communicates the pending output.
+---

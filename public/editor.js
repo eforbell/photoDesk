@@ -80,6 +80,22 @@
     return { aspect, x: 0, y: (1 - height) / 2, width: 1, height };
   }
 
+  function containSize(containerWidth, containerHeight, aspectRatio, maxWidth = Infinity) {
+    const widthLimit = Math.max(0, Math.min(Number(containerWidth) || 0, maxWidth));
+    const heightLimit = Math.max(0, Number(containerHeight) || 0);
+    const ratio = Number(aspectRatio);
+    if (!widthLimit || !heightLimit || !Number.isFinite(ratio) || ratio <= 0) {
+      return { width: 0, height: 0 };
+    }
+    let width = widthLimit;
+    let height = width / ratio;
+    if (height > heightLimit) {
+      height = heightLimit;
+      width = height * ratio;
+    }
+    return { width, height };
+  }
+
   function isNeutralEdit(adjustments, crop) {
     return Object.values(normalizeAdjustments(adjustments)).every(value => value === 0)
       && (!crop || crop.aspect === 'Original');
@@ -90,6 +106,7 @@
     CROP_ASPECTS,
     PRESETS,
     adjustmentFilter,
+    containSize,
     cropForAspect,
     isNeutralEdit,
     normalizeAdjustments,

@@ -1468,10 +1468,41 @@ function closeEditor() {
 function editorAspectRatio() {
   const meta = state.assetMeta[state.editorAssetId] || {};
   return PhotoDeskEditor.ratioValue(
-    state.editorCrop?.aspect || 'Original',
+    'Original',
     meta.width,
     meta.height
   );
+}
+
+function updateEditorFrameSize() {
+  if (!state.editorOpen) return;
+  const stage = $('editor-image-frame').parentElement;
+  const style = getComputedStyle(stage);
+  const availableWidth = stage.clientWidth
+    - parseFloat(style.paddingLeft)
+    - parseFloat(style.paddingRight);
+  const availableHeight = stage.clientHeight
+    - parseFloat(style.paddingTop)
+    - parseFloat(style.paddingBottom);
+  const size = PhotoDeskEditor.containSize(
+    availableWidth,
+    availableHeight,
+    editorAspectRatio(),
+    1100
+  );
+  const frame = $('editor-image-frame');
+  frame.style.width = `${size.width}px`;
+  frame.style.height = `${size.height}px`;
+}
+
+function updateEditorCropOverlay() {
+  const overlay = $('editor-thirds');
+  const crop = state.editorCrop || { x: 0, y: 0, width: 1, height: 1 };
+  overlay.style.left = `${crop.x * 100}%`;
+  overlay.style.top = `${crop.y * 100}%`;
+  overlay.style.width = `${crop.width * 100}%`;
+  overlay.style.height = `${crop.height * 100}%`;
+  overlay.classList.toggle('hidden', state.editorTool !== 'crop');
 }
 
 function histogramSvg(seed, exposure) {
@@ -1503,7 +1534,8 @@ function updateEditorPreview() {
   $('editor-temp-overlay').style.background = PhotoDeskEditor.temperatureOverlay(adjustments);
   $('editor-vignette-overlay').style.background = PhotoDeskEditor.vignetteOverlay(adjustments);
   frame.style.aspectRatio = editorAspectRatio();
-  $('editor-thirds').classList.toggle('hidden', state.editorTool !== 'crop');
+  updateEditorFrameSize();
+  updateEditorCropOverlay();
   $('editor-histogram').innerHTML = histogramSvg(
     state.editorAssetId,
     adjustments.exposure
@@ -1622,14 +1654,15 @@ function renderEditor() {
   $('editor-filename').textContent = meta.originalFileName || assetId.substring(0, 12);
   const editorImage = $('editor-image');
   editorImage.onload = () => {
-    if (meta.width > 0 && meta.height > 0) return;
-    meta.width = editorImage.naturalWidth;
-    meta.height = editorImage.naturalHeight;
-    state.editorCrop = PhotoDeskEditor.cropForAspect(
-      meta,
-      state.editorCrop?.aspect || 'Original'
-    );
-    renderEditorControls();
+    if (!(meta.width > 0 && meta.height > 0)) {
+      meta.width = editorImage.naturalWidth;
+      meta.height = editorImage.naturalHeight;
+      state.editorCrop = PhotoDeskEditor.cropForAspect(
+        meta,
+        state.editorCrop?.aspect || 'Original'
+      );
+      renderEditorControls();
+    }
     updateEditorPreview();
   };
   editorImage.src = `/api/proxy/thumbnail/${assetId}`;
@@ -1702,6 +1735,9 @@ document.querySelectorAll('.editor-tool').forEach(button => {
     renderEditor();
   });
 });
+new ResizeObserver(() => {
+  if (state.editorOpen) updateEditorFrameSize();
+}).observe(document.querySelector('.editor-stage'));
 
 // ── Keyboard handling ──────────────────────────────────────────
 document.addEventListener('keydown', function (e) {
