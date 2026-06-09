@@ -1,6 +1,6 @@
 {
   "currentFeature": "Feature #3: Editor (Crop + Adjustments + Presets)",
-  "status": "in-progress",
+  "status": "ready-for-review",
   "branch": "feature/3-editor",
   "prdPath": "planning/features/feature-3-editor.json",
   "completedFeatures": [

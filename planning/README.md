@@ -19,7 +19,7 @@ Feature-driven development tracking for PhotoDesk, the photo review & light-edit
 | 0 | Foundation (Express backend, SQLite, Immich API client, basic review UI) | shipped |
 | 1 | Visual System + Workspace Redesign | shipped |
 | 2 | Library / Discover Screen | shipped |
-| 3 | Editor (Crop + Adjustments + Presets) | planned |
+| 3 | Editor (Crop + Adjustments + Presets) | ready for review |
 | 4 | Commit Hardening + Edited Asset Upload | planned |
 
 ## Design Reference
