@@ -161,3 +161,9 @@
 - Added mobile editor overscroll containment and hardened edited filenames against leading dots.
 - Added bounded-memory original streaming as a P2 follow-up rather than widening the review fix into a renderer architecture change.
 ---
+
+## 2026-06-09 — Uploaded Edit Discovery Reconciliation
+- Successful commits now mark both reviewed source assets and uploaded edited Immich asset IDs as processed.
+- Discovery and untriaged-only session creation also treat every persisted `edits.immich_asset_id` as processed, which repairs edits uploaded before this change without requiring a schema migration or recommit.
+- Commit results now report the combined processed count and the number of edited assets reconciled.
+---

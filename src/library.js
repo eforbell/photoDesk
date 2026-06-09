@@ -175,14 +175,26 @@ function readCachedSnapshot(db, refresh = false) {
   return JSON.parse(row.data);
 }
 
+function processedAssetIds(db) {
+  const ids = new Set(
+    db.prepare('SELECT asset_id FROM processed_assets').all().map(row => row.asset_id)
+  );
+  for (const row of db.prepare(`
+    SELECT immich_asset_id
+    FROM edits
+    WHERE immich_asset_id IS NOT NULL
+  `).all()) {
+    ids.add(row.immich_asset_id);
+  }
+  return ids;
+}
+
 async function getLibrarySnapshot(db, { refresh = false } = {}) {
   const cached = readCachedSnapshot(db, refresh);
   if (cached) return cached;
 
   const assets = await fetchAllAssets();
-  const processedIds = new Set(
-    db.prepare('SELECT asset_id FROM processed_assets').all().map(row => row.asset_id)
-  );
+  const processedIds = processedAssetIds(db);
   const snapshot = buildSnapshot(assets, processedIds);
   db.prepare(`
     INSERT INTO density_cache (id, computed_at, data)
@@ -204,5 +216,6 @@ module.exports = {
   formatDateRange,
   getLibrarySnapshot,
   invalidateLibraryCache,
+  processedAssetIds,
   rangeSummary,
 };

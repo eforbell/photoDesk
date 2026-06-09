@@ -5,6 +5,7 @@ const {
   clusterSuggestions,
   dateKeyInTimeZone,
   formatDateRange,
+  processedAssetIds,
   rangeSummary,
 } = require('../src/library');
 const {
@@ -35,6 +36,28 @@ test('computes exact processed and untriaged counts from current assets', () => 
   assert.equal(snapshot.totalUntriaged, 2);
   assert.equal(snapshot.activeDays, 2);
   assert.equal(snapshot.days[0].untriagedCount, 1);
+});
+
+test('treats previously uploaded edited assets as processed during discovery', () => {
+  const db = {
+    prepare(sql) {
+      if (sql.includes('FROM processed_assets')) {
+        return { all: () => [{ asset_id: 'original' }] };
+      }
+      if (sql.includes('FROM edits')) {
+        return { all: () => [
+          { immich_asset_id: 'edited-version' },
+          { immich_asset_id: 'edited-version' },
+        ] };
+      }
+      throw new Error(`Unexpected SQL: ${sql}`);
+    },
+  };
+
+  assert.deepEqual(
+    [...processedAssetIds(db)].sort(),
+    ['edited-version', 'original']
+  );
 });
 
 test('suggestions allow one empty calendar day and remain newest first', () => {
