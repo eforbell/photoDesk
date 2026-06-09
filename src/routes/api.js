@@ -17,6 +17,11 @@ const {
   rangeSummary,
 } = require('../library');
 const config = require('../config');
+const {
+  parseEditRow,
+  validateAdjustments,
+  validateCrop,
+} = require('../editor');
 
 function localDateBoundary(dateKey, endOfDay = false) {
   if (!dateKey || !/^\d{4}-\d{2}-\d{2}$/.test(dateKey)) return dateKey;
@@ -238,6 +243,7 @@ router.get('/sessions/:id/scenes', (req, res) => {
   const decisions = db.prepare('SELECT * FROM decisions WHERE session_id = ?').all(req.params.id);
   const ratingsRows = db.prepare('SELECT * FROM ratings WHERE session_id = ?').all(req.params.id);
   const stackGroupRows = db.prepare('SELECT * FROM stack_groups WHERE session_id = ?').all(req.params.id);
+  const editRows = db.prepare('SELECT * FROM edits WHERE session_id = ?').all(req.params.id);
 
   const decisionMap = {};
   for (const d of decisions) {
@@ -284,6 +290,7 @@ router.get('/sessions/:id/scenes', (req, res) => {
     ratingMap,
     stackGroups,
     stackGroupMap,
+    editMap: Object.fromEntries(editRows.map(row => [row.asset_id, parseEditRow(row)])),
   });
 });
 
@@ -359,6 +366,60 @@ router.delete('/ratings', (req, res) => {
 
   const db = getDb();
   db.prepare('DELETE FROM ratings WHERE session_id = ? AND asset_id = ?').run(sessionId, assetId);
+  res.json({ ok: true });
+});
+
+// POST /api/edits
+router.post('/edits', (req, res) => {
+  const { sessionId, assetId } = req.body;
+  if (!sessionId || !assetId) {
+    return res.status(400).json({ error: 'sessionId and assetId are required' });
+  }
+
+  let adjustments;
+  let crop;
+  try {
+    adjustments = validateAdjustments(req.body.adjustments);
+    crop = validateCrop(req.body.crop);
+  } catch (err) {
+    return res.status(400).json({ error: err.message });
+  }
+
+  const db = getDb();
+  const session = db.prepare('SELECT id FROM sessions WHERE id = ?').get(sessionId);
+  if (!session) return res.status(404).json({ error: 'Session not found' });
+  if (!sessionAssetIds(db, sessionId).includes(assetId)) {
+    return res.status(400).json({ error: 'Asset does not belong to this session' });
+  }
+
+  db.prepare(`
+    INSERT INTO edits (session_id, asset_id, adjustments, crop, render_status)
+    VALUES (?, ?, ?, ?, 'pending')
+    ON CONFLICT(session_id, asset_id) DO UPDATE SET
+      adjustments = excluded.adjustments,
+      crop = excluded.crop,
+      rendered_path = NULL,
+      render_status = 'pending',
+      render_error = NULL,
+      immich_asset_id = NULL,
+      updated_at = datetime('now')
+  `).run(sessionId, assetId, JSON.stringify(adjustments), JSON.stringify(crop));
+
+  const row = db.prepare(
+    'SELECT * FROM edits WHERE session_id = ? AND asset_id = ?'
+  ).get(sessionId, assetId);
+  res.json(parseEditRow(row));
+});
+
+// DELETE /api/edits
+router.delete('/edits', (req, res) => {
+  const { sessionId, assetId } = req.body;
+  if (!sessionId || !assetId) {
+    return res.status(400).json({ error: 'sessionId and assetId are required' });
+  }
+  const db = getDb();
+  db.prepare('DELETE FROM edits WHERE session_id = ? AND asset_id = ?')
+    .run(sessionId, assetId);
   res.json({ ok: true });
 });
 

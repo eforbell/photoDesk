@@ -14,6 +14,9 @@ function icon(name, size = 16, strokeW = 1.6) {
     star:     `<svg ${a}><path d="M12 3l2.6 5.6 6 .7-4.4 4.1 1.2 6L12 16.9 6.6 19.4l1.2-6L3.4 9.3l6-.7z"/></svg>`,
     stack:    `<svg ${a}><path d="M12 3l9 5-9 5-9-5 9-5z"/><path d="M3 13l9 5 9-5"/></svg>`,
     layers:   `<svg ${a}><path d="M12 3l9 5-9 5-9-5 9-5z"/><path d="M3 13l9 5 9-5"/></svg>`,
+    crop:     `<svg ${a}><path d="M6 2v14a2 2 0 0 0 2 2h14"/><path d="M2 6h14a2 2 0 0 1 2 2v14"/></svg>`,
+    sliders:  `<svg ${a}><path d="M4 7h11M19 7h1M4 17h1M9 17h11"/><circle cx="17" cy="7" r="2.2"/><circle cx="7" cy="17" r="2.2"/></svg>`,
+    reset:    `<svg ${a}><path d="M3 12a9 9 0 1 0 3-6.7M3 4v4h4"/></svg>`,
     maximize: `<svg ${a}><path d="M8 3H5a2 2 0 0 0-2 2v3M16 3h3a2 2 0 0 1 2 2v3M21 16v3a2 2 0 0 1-2 2h-3M3 16v3a2 2 0 0 0 2 2h3"/></svg>`,
     arrowR:   `<svg ${a}><path d="M5 12h14M13 6l6 6-6 6"/></svg>`,
   };
@@ -40,6 +43,7 @@ const state = {
   ratingMap: {},
   stackGroups: [],
   stackGroupMap: {},
+  editMap: {},
 
   mode: 'cull',          // 'cull'|'rate'|'stack'
   hideRejects: false,
@@ -48,6 +52,12 @@ const state = {
   // Lightbox
   lightboxOpen: false,
   lightboxIndex: 0,
+  editorOpen: false,
+  editorAssetId: null,
+  editorTool: 'adjust',
+  editorAdjustments: null,
+  editorCrop: null,
+  editorOriginal: null,
 
   // Stack mode selection
   stackSelection: new Set(),
@@ -495,11 +505,14 @@ async function openSession(sessionId) {
     state.ratingMap = scenesData.ratingMap || {};
     state.stackGroups = scenesData.stackGroups || [];
     state.stackGroupMap = scenesData.stackGroupMap || {};
+    state.editMap = scenesData.editMap || {};
     state.mode = 'cull';
     state.hideRejects = false;
     state.filterShow = 'all';
     state.lightboxOpen = false;
     state.lightboxIndex = 0;
+    state.editorOpen = false;
+    state.editorAssetId = null;
     state.stackSelection = new Set();
     state.focusedAssetId = null;
 
@@ -836,12 +849,14 @@ function renderGridItem(assetId) {
   const isRated = rating !== null;
   const isFocused = state.focusedAssetId === assetId;
   const meta = state.assetMeta[assetId] || {};
+  const edit = state.editMap[assetId] || null;
 
   const classes = ['grid-item'];
   if (decision === 'pick') classes.push('is-pick');
   if (decision === 'reject') classes.push('is-reject');
   if (isRated) classes.push('is-rated');
   if (stackGroupId) classes.push('in-stack-group');
+  if (edit) classes.push('is-edited');
   if (isStackSelected) classes.push('stack-selected');
   if (isFocused) classes.push('is-focused');
 
@@ -882,6 +897,9 @@ function renderGridItem(assetId) {
   if (stackGroupId) {
     badges += `<div class="grid-stack-badge">${icon('stack', 9, 2.2)}${state.stackGroups.findIndex(sg => sg.id === stackGroupId) + 1}</div>`;
   }
+  if (edit) {
+    badges += '<div class="grid-edit-badge">EDIT</div>';
+  }
 
   // Hover quick actions (only in cull mode + non-stack)
   let hoverActions = '';
@@ -891,13 +909,14 @@ function renderGridItem(assetId) {
       actionBtns += `<button class="quick-btn" data-action="keep" title="Keep">${icon('keep', 14, 2.1)}</button>`;
       actionBtns += `<button class="quick-btn" data-action="reject" title="Reject">${icon('reject', 14, 2.1)}</button>`;
     }
+    actionBtns += `<button class="quick-btn" data-action="edit" title="Edit">${icon('sliders', 14, 2.1)}</button>`;
     actionBtns += `<button class="quick-btn" data-action="open" title="Open">${icon('maximize', 14, 2.1)}</button>`;
     hoverActions = `<div class="grid-item-hover"><div class="grid-hover-actions">${actionBtns}</div></div>`;
   }
 
   return `
     <div class="${classes.join(' ')}" data-asset-id="${assetId}" data-pid="${assetId}" ${inlineStyle}>
-      <img src="/api/proxy/thumbnail/${assetId}" loading="lazy" alt="" />
+      <img src="/api/proxy/thumbnail/${assetId}" loading="lazy" alt="" ${edit ? `style="filter:${PhotoDeskEditor.adjustmentFilter(edit.adjustments)}"` : ''} />
       ${badges}
       ${hoverActions}
     </div>
@@ -955,6 +974,7 @@ function attachHoverActions(el) {
       const action = btn.dataset.action;
       if (action === 'keep') recordDecision(assetId, 'pick');
       else if (action === 'reject') recordDecision(assetId, 'reject');
+      else if (action === 'edit') openEditor(assetId);
       else if (action === 'open') openLightbox(assetId);
     });
   });
@@ -1022,6 +1042,7 @@ function openLightbox(assetId) {
 }
 
 function closeLightbox() {
+  if (state.editorOpen) closeEditor();
   state.lightboxOpen = false;
   $('lightbox').classList.add('hidden');
   renderKeyboardLegend();
@@ -1044,13 +1065,24 @@ function renderLightbox() {
   const decision = state.decisionMap[assetId] || null;
   const rating = state.ratingMap[assetId] || null;
   const meta = state.assetMeta[assetId] || {};
+  const edit = state.editMap[assetId] || null;
 
   // Image
   const img = $('lb-image');
   img.style.opacity = '0.6';
   img.src = `/api/proxy/thumbnail/${assetId}`;
+  img.style.filter = edit ? PhotoDeskEditor.adjustmentFilter(edit.adjustments) : '';
   img.onload = () => { img.style.opacity = '1'; };
   img.onerror = () => { img.style.opacity = '0.3'; };
+  $('lb-edit-temp').style.background = edit
+    ? PhotoDeskEditor.temperatureOverlay(edit.adjustments)
+    : '';
+  $('lb-edit-temp').classList.toggle('visible', Boolean($('lb-edit-temp').style.background));
+  $('lb-edit-vignette').style.background = edit
+    ? PhotoDeskEditor.vignetteOverlay(edit.adjustments)
+    : '';
+  $('lb-edit-vignette').classList.toggle('visible', Boolean($('lb-edit-vignette').style.background));
+  $('lb-edited-badge').classList.toggle('visible', Boolean(edit));
 
   // Filename
   $('lb-filename').textContent = meta.originalFileName || assetId.substring(0, 12);
@@ -1120,6 +1152,7 @@ function renderFilmstrip(visible, activeIndex) {
     const decision = state.decisionMap[id] || null;
     const rating = state.ratingMap[id] || null;
     const isActive = i === activeIndex;
+    const edit = state.editMap[id] || null;
 
     // Aspect ratio for filmstrip thumb
     let arStyle = '';
@@ -1136,10 +1169,11 @@ function renderFilmstrip(visible, activeIndex) {
     if (rating && rating > 0) {
       overlays += `<div class="filmstrip-stars">${'\u2605'.repeat(rating)}</div>`;
     }
+    if (edit) overlays += '<div class="filmstrip-edit-dot">E</div>';
 
     html += `
       <div class="filmstrip-thumb ${isActive ? 'active' : ''}" data-index="${i}" style="${arStyle}">
-        <img src="/api/proxy/thumbnail/${id}" loading="lazy" alt="" />
+        <img src="/api/proxy/thumbnail/${id}" loading="lazy" alt="" ${edit ? `style="filter:${PhotoDeskEditor.adjustmentFilter(edit.adjustments)}"` : ''} />
         ${overlays}
       </div>
     `;
@@ -1174,7 +1208,7 @@ function renderLightboxHints() {
     items = `${legend('P', 'Keep')}${legend('X', 'Reject')}${legend('U', 'Unset')}`;
   }
 
-  items += `${legend('\u2190 \u2192', 'Navigate')}${legend('\u21B5', 'Next scene')}${legend('Esc', 'Close')}`;
+  items += `${legend('\u2190 \u2192', 'Navigate')}${legend('\u21B5', 'Next scene')}${legend('E', 'Edit')}${legend('Esc', 'Close')}`;
   hints.innerHTML = items;
 }
 
@@ -1348,9 +1382,302 @@ $('btn-clear-selection').addEventListener('click', () => {
   renderGrid();
 });
 
+// ── EDITOR ─────────────────────────────────────────────────────
+const EDITOR_SLIDER_GROUPS = [
+  {
+    label: 'Light',
+    controls: [
+      ['exposure', 'Exposure'],
+      ['contrast', 'Contrast'],
+      ['highlights', 'Highlights'],
+      ['shadows', 'Shadows'],
+    ],
+  },
+  {
+    label: 'Color',
+    controls: [
+      ['temp', 'Temp'],
+      ['saturation', 'Saturation'],
+      ['vibrance', 'Vibrance'],
+    ],
+  },
+  { label: 'Effects', controls: [['vignette', 'Vignette', 0]] },
+];
+
+function currentEditorEdit() {
+  return state.editMap[state.editorAssetId] || null;
+}
+
+function editorDraftValue() {
+  return {
+    adjustments: PhotoDeskEditor.normalizeAdjustments(state.editorAdjustments),
+    crop: state.editorCrop,
+  };
+}
+
+function editorDirty() {
+  return JSON.stringify(editorDraftValue()) !== JSON.stringify(state.editorOriginal);
+}
+
+function openEditor(assetId) {
+  if (!state.currentSession || !state.assetMeta[assetId]) return;
+  const edit = state.editMap[assetId];
+  const meta = state.assetMeta[assetId];
+  state.editorOpen = true;
+  state.editorAssetId = assetId;
+  state.editorTool = 'adjust';
+  state.editorAdjustments = PhotoDeskEditor.normalizeAdjustments(edit?.adjustments);
+  state.editorCrop = edit?.crop || PhotoDeskEditor.cropForAspect(meta, 'Original');
+  state.editorOriginal = editorDraftValue();
+  $('editor').classList.remove('hidden');
+  $('keyboard-legend').style.display = 'none';
+  renderEditor();
+}
+
+function closeEditor() {
+  state.editorOpen = false;
+  state.editorAssetId = null;
+  $('editor').classList.add('hidden');
+  if (state.lightboxOpen) {
+    renderLightbox();
+  } else {
+    renderKeyboardLegend();
+    updateFocusRing();
+  }
+}
+
+function editorAspectRatio() {
+  const meta = state.assetMeta[state.editorAssetId] || {};
+  return PhotoDeskEditor.ratioValue(
+    state.editorCrop?.aspect || 'Original',
+    meta.width,
+    meta.height
+  );
+}
+
+function histogramSvg(seed, exposure) {
+  let value = 0;
+  for (const char of String(seed)) value += char.charCodeAt(0);
+  const points = [];
+  for (let i = 0; i < 48; i++) {
+    const x = i / 47;
+    const wave = (Math.sin(x * 6 + value) + Math.sin(x * 13 + value * 0.7)) / 4 + 0.5;
+    const bell = Math.exp(-Math.pow((x - 0.5) * 2.4, 2)) * 0.55;
+    points.push(Math.max(0.04, wave * 0.55 + bell));
+  }
+  const shift = Number(exposure || 0) / 100 * 22;
+  const path = points.map((point, index) => {
+    const x = index / 47 * 240 + shift;
+    const y = 56 - point * 51;
+    return `${index ? 'L' : 'M'}${x.toFixed(1)} ${y.toFixed(1)}`;
+  }).join(' ');
+  return `<svg viewBox="0 0 240 56" preserveAspectRatio="none" aria-hidden="true">
+    <path d="${path} L${(240 + shift).toFixed(1)} 56 L0 56 Z" fill="oklch(0.85 0 0 / 0.32)"></path>
+    <path d="${path}" fill="none" stroke="oklch(0.66 0.15 256 / 0.6)" stroke-width="1"></path>
+  </svg>`;
+}
+
+function updateEditorPreview() {
+  const adjustments = state.editorAdjustments;
+  const frame = $('editor-image-frame');
+  $('editor-image').style.filter = PhotoDeskEditor.adjustmentFilter(adjustments);
+  $('editor-temp-overlay').style.background = PhotoDeskEditor.temperatureOverlay(adjustments);
+  $('editor-vignette-overlay').style.background = PhotoDeskEditor.vignetteOverlay(adjustments);
+  frame.style.aspectRatio = editorAspectRatio();
+  $('editor-thirds').classList.toggle('hidden', state.editorTool !== 'crop');
+  $('editor-histogram').innerHTML = histogramSvg(
+    state.editorAssetId,
+    adjustments.exposure
+  );
+  const dirty = editorDirty();
+  $('editor-save').textContent = dirty
+    ? (PhotoDeskEditor.isNeutralEdit(adjustments, state.editorCrop) ? 'Remove edit' : 'Save edit')
+    : 'Done';
+  $('editor-save').disabled = false;
+  $('editor-save').classList.toggle('is-dirty', dirty);
+  $('editor-reset').disabled = PhotoDeskEditor.isNeutralEdit(adjustments, state.editorCrop);
+}
+
+function renderEditorRating() {
+  const current = state.ratingMap[state.editorAssetId] || 0;
+  $('editor-rating-stars').innerHTML = Array.from({ length: 5 }, (_, index) => {
+    const value = index + 1;
+    return `<button class="editor-star ${current >= value ? 'active' : ''}" data-rating="${value}" aria-label="${value} stars">
+      ${icon('star', 18, 1.4)}
+    </button>`;
+  }).join('');
+  $('editor-rating-stars').querySelectorAll('.editor-star').forEach(button => {
+    button.addEventListener('click', () => {
+      const value = Number(button.dataset.rating);
+      recordRating(state.editorAssetId, current === value ? 0 : value);
+      renderEditorRating();
+    });
+  });
+}
+
+function renderEditorAdjustControls() {
+  const presets = PhotoDeskEditor.PRESETS.map(preset => `
+    <button class="editor-preset" data-preset="${preset.id}">${preset.name}</button>
+  `).join('');
+  const groups = EDITOR_SLIDER_GROUPS.map(group => `
+    <section class="editor-control-group">
+      <div class="editor-eyebrow">${group.label}</div>
+      ${group.controls.map(([key, label, min = -100]) => {
+        const value = state.editorAdjustments[key];
+        return `<label class="editor-slider" data-adjustment="${key}">
+          <span class="editor-slider-label" title="Double-click to reset">${label}</span>
+          <span class="editor-slider-value mono">${value > 0 ? '+' : ''}${value}</span>
+          <input type="range" min="${min}" max="100" value="${value}" />
+        </label>`;
+      }).join('')}
+    </section>
+  `).join('');
+  $('editor-controls').innerHTML = `
+    <section class="editor-presets">
+      <div class="editor-eyebrow">Presets</div>
+      <div class="editor-preset-row">${presets}</div>
+    </section>
+    ${groups}
+  `;
+
+  $('editor-controls').querySelectorAll('.editor-preset').forEach(button => {
+    button.addEventListener('click', () => {
+      const preset = PhotoDeskEditor.PRESETS.find(item => item.id === button.dataset.preset);
+      state.editorAdjustments = PhotoDeskEditor.normalizeAdjustments(preset.adj);
+      renderEditorControls();
+      updateEditorPreview();
+    });
+  });
+  $('editor-controls').querySelectorAll('.editor-slider').forEach(label => {
+    const key = label.dataset.adjustment;
+    const input = label.querySelector('input');
+    const value = label.querySelector('.editor-slider-value');
+    input.addEventListener('input', () => {
+      state.editorAdjustments[key] = Number(input.value);
+      value.textContent = `${input.value > 0 ? '+' : ''}${input.value}`;
+      updateEditorPreview();
+    });
+    label.querySelector('.editor-slider-label').addEventListener('dblclick', () => {
+      state.editorAdjustments[key] = 0;
+      input.value = 0;
+      value.textContent = '0';
+      updateEditorPreview();
+    });
+  });
+}
+
+function renderEditorCropControls() {
+  $('editor-controls').innerHTML = `
+    <section class="editor-crop-controls">
+      <div class="editor-eyebrow">Aspect ratio</div>
+      <div class="editor-aspect-grid">
+        ${PhotoDeskEditor.CROP_ASPECTS.map(aspect => `
+          <button class="editor-aspect ${state.editorCrop.aspect === aspect ? 'active' : ''}" data-aspect="${aspect}">
+            ${aspect}
+          </button>
+        `).join('')}
+      </div>
+      <p>Crop is centered and saved as normalized coordinates. The original remains untouched.</p>
+    </section>
+  `;
+  $('editor-controls').querySelectorAll('.editor-aspect').forEach(button => {
+    button.addEventListener('click', () => {
+      state.editorCrop = PhotoDeskEditor.cropForAspect(
+        state.assetMeta[state.editorAssetId],
+        button.dataset.aspect
+      );
+      renderEditorCropControls();
+      updateEditorPreview();
+    });
+  });
+}
+
+function renderEditorControls() {
+  if (state.editorTool === 'crop') renderEditorCropControls();
+  else renderEditorAdjustControls();
+}
+
+function renderEditor() {
+  const assetId = state.editorAssetId;
+  const meta = state.assetMeta[assetId] || {};
+  $('editor-filename').textContent = meta.originalFileName || assetId.substring(0, 12);
+  $('editor-image').src = `/api/proxy/thumbnail/${assetId}`;
+  document.querySelectorAll('.editor-tool').forEach(button => {
+    button.classList.toggle('active', button.dataset.editorTool === state.editorTool);
+  });
+  renderEditorControls();
+  renderEditorRating();
+  updateEditorPreview();
+}
+
+async function saveEditor() {
+  if (!editorDirty()) {
+    closeEditor();
+    return;
+  }
+
+  const button = $('editor-save');
+  button.disabled = true;
+  button.textContent = 'Saving…';
+  try {
+    if (PhotoDeskEditor.isNeutralEdit(state.editorAdjustments, state.editorCrop)) {
+      await api('DELETE', '/api/edits', {
+        sessionId: state.currentSession.id,
+        assetId: state.editorAssetId,
+      });
+      delete state.editMap[state.editorAssetId];
+      showToast('Edit removed · original unchanged');
+    } else {
+      const edit = await api('POST', '/api/edits', {
+        sessionId: state.currentSession.id,
+        assetId: state.editorAssetId,
+        adjustments: state.editorAdjustments,
+        crop: state.editorCrop,
+      });
+      state.editMap[state.editorAssetId] = edit;
+      showToast('Edit saved locally · original preserved');
+    }
+    refreshGridItem(state.editorAssetId);
+    closeEditor();
+  } catch (err) {
+    button.disabled = false;
+    updateEditorPreview();
+    alert(`Failed to save edit: ${err.message}`);
+  }
+}
+
+$('lb-edit').addEventListener('click', () => {
+  const visible = getVisibleAssets();
+  openEditor(visible[state.lightboxIndex]);
+});
+$('editor-close').addEventListener('click', closeEditor);
+$('editor-cancel').addEventListener('click', closeEditor);
+$('editor-save').addEventListener('click', saveEditor);
+$('editor-reset').addEventListener('click', () => {
+  state.editorAdjustments = PhotoDeskEditor.normalizeAdjustments();
+  state.editorCrop = PhotoDeskEditor.cropForAspect(
+    state.assetMeta[state.editorAssetId],
+    'Original'
+  );
+  renderEditor();
+});
+document.querySelectorAll('.editor-tool').forEach(button => {
+  button.addEventListener('click', () => {
+    state.editorTool = button.dataset.editorTool;
+    renderEditor();
+  });
+});
+
 // ── Keyboard handling ──────────────────────────────────────────
 document.addEventListener('keydown', function (e) {
   if (!screens.review.classList.contains('active')) return;
+  if (state.editorOpen) {
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      closeEditor();
+    }
+    return;
+  }
   if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT') return;
 
   if (state.lightboxOpen) {
@@ -1377,6 +1704,11 @@ document.addEventListener('keydown', function (e) {
         } else {
           lbJumpToNextScene();
         }
+        break;
+      case 'e':
+      case 'E':
+        e.preventDefault();
+        openEditor(assetId);
         break;
       case 'p':
       case 'P':
@@ -1439,6 +1771,11 @@ document.addEventListener('keydown', function (e) {
   if (k === 'Enter' || k === 'o' || k === 'O') {
     e.preventDefault();
     openLightbox(focusedId);
+    return;
+  }
+  if (k === 'e' || k === 'E') {
+    e.preventDefault();
+    openEditor(focusedId);
     return;
   }
 

@@ -1,7 +1,7 @@
 {
   "branchName": "feature/3-editor",
   "projectName": "PhotoDesk",
-  "status": "planned",
+  "status": "in-progress",
   "detailLevel": "actionable after Feature 1 and Feature 2 learnings",
   "description": "Add a humble, non-destructive photo editor accessible from the review grid and lightbox. It supports crop, core adjustments, and presets with a live browser preview, server-side rendering, local edit persistence, thumbnail/lightbox badges, and commit-time upload/stacking into Immich as edited versions. The editor must keep the existing Review -> Rate -> Stack -> Commit workflow fast and visually consistent with the design handoff.",
   "designReference": "design/design_handoff_photodesk/lightbox.jsx (Editor, Stage, Histogram), design/design_handoff_photodesk/components.jsx (adjCss, tempOverlay, vignetteOverlay, ADJ_ZERO, PRESETS), design/design_handoff_photodesk/README.md Section 4 (Editor).",
@@ -49,7 +49,8 @@
         "Closing returns to the same scene, selection, stage, filter, and scroll position.",
         "The existing stage header remains usable; editor entry does not hide the path to Commit on narrow screens.",
         "The shell matches shipped typography, borders, dark surface, and control sizing."
-      ]
+      ],
+      "status": "completed"
     },
     {
       "id": "ED-002",
@@ -61,7 +62,8 @@
         "Controls use -100..100 except vignette 0..100; reset affordance restores individual sliders to zero.",
         "Star rating remains available in Review/lightbox/editor contexts via taps/clicks and keyboard 1-5.",
         "Saved ratings and edit states are independent: rating changes do not dirty edit state."
-      ]
+      ],
+      "status": "completed"
     },
     {
       "id": "ED-003",
@@ -73,7 +75,8 @@
         "Preset selection applies a complete adjustment bundle immediately and remains editable afterward.",
         "Temperature/vignette overlays are visually close to the design prototype and do not block pointer interactions.",
         "Original preset restores ADJ_ZERO."
-      ]
+      ],
+      "status": "completed"
     },
     {
       "id": "ED-004",
@@ -85,7 +88,8 @@
         "The crop overlay is visible against bright/dark photos and follows current design tokens.",
         "Crop coordinates are stored normalized so preview and server rendering are resolution-independent.",
         "On narrow screens, crop handles remain touchable and Save/Cancel remains visible without rotating the device."
-      ]
+      ],
+      "status": "completed"
     },
     {
       "id": "ED-005",
@@ -97,7 +101,8 @@
         "HEIC/iPhone originals are detected; unsupported libvips/HEIC capability returns a clear app error instead of corrupt output.",
         "Render failure leaves the previous ready edit intact when one exists and records render_error for visibility/retry.",
         "Rendered file writes are atomic: temporary path first, then rename into final location."
-      ]
+      ],
+      "status": "planned"
     },
     {
       "id": "ED-006",
@@ -109,7 +114,8 @@
         "Grid cards, lightbox filmstrip, and image stage show a compact EDITED badge using existing blue accent styling.",
         "Changing a saved edit returns status to pending/rendering/ready as appropriate without creating duplicate rows.",
         "Session labels added during Feature 2 remain unchanged by editor state."
-      ]
+      ],
+      "status": "in-progress"
     },
     {
       "id": "ED-007",
@@ -122,7 +128,8 @@
         "Successful edited upload stores immich_asset_id and marks the edit uploaded, making retry idempotent enough to avoid duplicate uploads when possible.",
         "A failed upload does not mark the session committed/processed; the user can retry after fixing the error.",
         "After successful commit, local discovery/library caches are invalidated so newly uploaded edited assets do not appear as unreviewed originals."
-      ]
+      ],
+      "status": "planned"
     },
     {
       "id": "ED-008",
@@ -134,7 +141,8 @@
         "At approximately <=700px, the editor becomes a stacked/fullscreen layout with controls reachable by tabs/drawer and persistent Save/Cancel actions.",
         "Text inputs/selects use mobile-safe sizing where relevant to avoid iOS zoom; taps work without hover assumptions.",
         "Keyboard legend can compress or hide on narrow screens, but primary actions cannot become unreachable."
-      ]
+      ],
+      "status": "completed"
     },
     {
       "id": "ED-009",
@@ -146,7 +154,8 @@
         "Backend tests exercise adjustment JSON validation and reject invalid crop/range values.",
         "A fixture render test compares output dimensions, crop bounds, and deterministic file creation for at least one JPEG.",
         "Manual QA notes include desktop and narrow-width screenshots before the feature is marked shipped."
-      ]
+      ],
+      "status": "in-progress"
     }
   ],
   "backendDependencies": [
@@ -168,5 +177,6 @@
     "RAW workflow",
     "Batch edit synchronization across assets",
     "Advanced color grading beyond presets and basic sliders"
-  ]
+  ],
+  "implementationSlice": "Editor recipes and live preview are shipped on the feature branch; sharp rendering and Immich upload/stacking remain."
 }

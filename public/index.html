@@ -181,7 +181,10 @@
           <span id="lb-counter" class="lb-counter"></span>
         </div>
         <div class="lb-header-right">
-          <!-- Edit button placeholder for Phase 3 -->
+          <button class="lb-edit-button" id="lb-edit" aria-label="Edit photo">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h11M19 7h1M4 17h1M9 17h11"/><circle cx="17" cy="7" r="2.2"/><circle cx="7" cy="17" r="2.2"/></svg>
+            Edit <span class="kbd">E</span>
+          </button>
         </div>
       </div>
 
@@ -192,8 +195,11 @@
 
         <div class="lb-image-wrap">
           <img id="lb-image" src="" alt="Photo" />
+          <div class="lb-edit-temp" id="lb-edit-temp"></div>
+          <div class="lb-edit-vignette" id="lb-edit-vignette"></div>
           <div class="lb-flash" id="lb-flash"></div>
           <div class="lb-decision-badge" id="lb-decision-badge"></div>
+          <div class="lb-edited-badge" id="lb-edited-badge">EDITED · original kept</div>
         </div>
 
         <button class="lb-nav lb-next" id="lb-next" aria-label="Next photo">
@@ -211,6 +217,57 @@
 
       <!-- Lightbox keyboard legend -->
       <div id="lb-hints" class="lb-hints"></div>
+    </div>
+
+    <!-- EDITOR -->
+    <div id="editor" class="editor hidden">
+      <div class="editor-preview">
+        <div class="editor-header">
+          <div class="editor-header-file">
+            <button class="editor-icon-button" id="editor-close" aria-label="Close editor">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
+            </button>
+            <span id="editor-filename" class="mono"></span>
+          </div>
+          <div class="editor-tool-tabs">
+            <button class="editor-tool active" data-editor-tool="adjust">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h11M19 7h1M4 17h1M9 17h11"/><circle cx="17" cy="7" r="2.2"/><circle cx="7" cy="17" r="2.2"/></svg>
+              Adjust
+            </button>
+            <button class="editor-tool" data-editor-tool="crop">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M6 2v14a2 2 0 0 0 2 2h14"/><path d="M2 6h14a2 2 0 0 1 2 2v14"/></svg>
+              Crop
+            </button>
+          </div>
+        </div>
+        <div class="editor-stage">
+          <div id="editor-image-frame" class="editor-image-frame">
+            <img id="editor-image" alt="Edit preview" />
+            <div id="editor-temp-overlay" class="editor-image-overlay editor-temp-overlay"></div>
+            <div id="editor-vignette-overlay" class="editor-image-overlay"></div>
+            <svg id="editor-thirds" class="editor-thirds hidden" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
+              <path d="M33.333 0V100M66.666 0V100M0 33.333H100M0 66.666H100"></path>
+            </svg>
+          </div>
+        </div>
+      </div>
+
+      <aside class="editor-panel">
+        <div class="editor-panel-head">
+          <div class="editor-eyebrow">Histogram</div>
+          <div id="editor-histogram" class="editor-histogram"></div>
+          <div class="editor-rating">
+            <span>Rating</span>
+            <div id="editor-rating-stars"></div>
+          </div>
+        </div>
+        <div id="editor-controls" class="editor-controls"></div>
+        <div class="editor-footer">
+          <button id="editor-reset" class="btn btn-ghost">Reset</button>
+          <button id="editor-cancel" class="btn btn-ghost">Cancel</button>
+          <button id="editor-save" class="btn btn-primary">Done</button>
+        </div>
+      </aside>
     </div>
 
     <!-- STACK MODE: group action bar -->
@@ -295,6 +352,7 @@
   </div>
 
   <script src="calendar.js"></script>
+  <script src="editor.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

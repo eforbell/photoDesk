@@ -95,3 +95,17 @@
   - The density API already returned the full timeline; the apparent cutoff was a presentation limit in `monthKeysForDays`.
   - Large real libraries need explicit temporal navigation rather than silently applying a design-mock window.
 ---
+
+## 2026-06-09 — Feature #3 Editor: Recipe + Live Preview Slice
+- Added migration `003-editor-state.sql` with durable per-session/asset adjustment, normalized crop, render status, error, path, and future Immich asset fields.
+- Added validated edit persistence endpoints and returned `editMap` with session workspace data.
+- Implemented the design-handoff editor in vanilla JS: lightbox/grid entry, fixed desktop split, stacked mobile layout, deterministic histogram, presets, eight live adjustment controls, temperature/vignette overlays, crop aspect presets, thirds grid, editor rating access, reset/remove behavior, and persistent Save/Cancel actions.
+- Added EDIT badges and adjusted previews in the grid, lightbox, and filmstrip; `E` now opens the editor from both focused grid and lightbox contexts.
+- Verified persistence against a copied local session: Warm + 4:5 crop saved as normalized coordinates with pending render status, survived reload, and restored into the editor. Invalid adjustment input returned HTTP 400.
+- Added 16 passing tests covering migrations, validation, browser preview math, and crop normalization.
+- Browser validation covered desktop adjustment/crop flows and a 390x844 stacked layout. Visual verdict: 94/100.
+- **Learnings:**
+  - Browser interaction caught a stale disabled Save button after reopening; editor render paths must always restore transient button state.
+  - Keeping rating inside the editor avoids forcing users out of a small-group correction flow.
+  - Persisting render status now lets the sharp/upload slice remain explicit and retryable instead of overloading recipe save semantics.
+---
