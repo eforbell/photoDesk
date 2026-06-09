@@ -161,6 +161,14 @@ test('persists the uploaded asset ID and retries stacking without a duplicate up
   assert.equal(afterRetry.render_status, 'uploaded');
   assert.equal(afterRetry.render_error, null);
   assert.equal(afterRetry.immich_asset_id, 'edited-asset-1');
+  assert.deepEqual(
+    getDb().prepare(
+      'SELECT asset_id FROM processed_assets WHERE session_id = ? ORDER BY asset_id'
+    ).all(sessionId).map(row => row.asset_id),
+    ['asset-1', 'edited-asset-1']
+  );
+  assert.equal(second.assetsProcessed, 2);
+  assert.equal(second.editedAssetsProcessed, 1);
   assert.equal(
     immichCalls.filter(call => call.href.endsWith('/api/assets') && call.method === 'POST').length,
     1

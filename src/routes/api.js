@@ -21,6 +21,7 @@ const {
   clusterSuggestions,
   getLibrarySnapshot,
   invalidateLibraryCache,
+  processedAssetIds,
   rangeSummary,
 } = require('../library');
 const config = require('../config');
@@ -199,9 +200,7 @@ router.post('/sessions', async (req, res) => {
     });
     if (untriagedOnly) {
       const db = getDb();
-      const processed = new Set(
-        db.prepare('SELECT asset_id FROM processed_assets').all().map(row => row.asset_id)
-      );
+      const processed = processedAssetIds(db);
       assets = assets.filter(asset => !processed.has(asset.id));
     }
 
@@ -821,12 +820,20 @@ router.post('/sessions/:id/commit', async (req, res) => {
 
   if (results.errors.length === 0) {
     const assetIds = sessionAssetIds(db, sessionId);
+    const uploadedEditIds = db.prepare(`
+      SELECT immich_asset_id
+      FROM edits
+      WHERE session_id = ?
+        AND render_status = 'uploaded'
+        AND immich_asset_id IS NOT NULL
+    `).all(sessionId).map(row => row.immich_asset_id);
+    const processedIds = [...new Set([...assetIds, ...uploadedEditIds])];
     const markCommitted = db.transaction(() => {
       const insertProcessed = db.prepare(`
         INSERT OR IGNORE INTO processed_assets (asset_id, session_id)
         VALUES (?, ?)
       `);
-      for (const assetId of assetIds) insertProcessed.run(assetId, sessionId);
+      for (const assetId of processedIds) insertProcessed.run(assetId, sessionId);
       db.prepare(`
         UPDATE sessions
         SET committed = 1, committed_at = datetime('now')
@@ -836,7 +843,8 @@ router.post('/sessions/:id/commit', async (req, res) => {
     });
     markCommitted();
     results.committed = true;
-    results.assetsProcessed = assetIds.length;
+    results.assetsProcessed = processedIds.length;
+    results.editedAssetsProcessed = uploadedEditIds.length;
   } else {
     results.committed = false;
   }
