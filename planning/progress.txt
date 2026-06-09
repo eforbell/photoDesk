@@ -150,3 +150,14 @@
 - Browser-validated the reported 3:4 JPEG at desktop and 390×844, including a 1:1 crop selection. Visual verdict: 98/100.
 - **Learning:** Crop intent and preview viewport are separate concerns; the viewport should remain source-faithful while the crop rectangle communicates the pending output.
 ---
+
+## 2026-06-09 — Feature #3 PR Review Hardening
+- Verified the disputed existing-stack path against both official Immich API source and local Immich 2.7.5. `PUT /api/assets/copy` is stable and successfully copied a temporary edited asset into the original's existing stack while preserving the primary; `StackUpdateDto` only accepts `primaryAssetId` and cannot append assets.
+- Moved edit session/membership validation outside the per-asset lock and made locked work return response data instead of sending Express responses internally.
+- Documented that edit lock entries self-prune after the newest waiter completes.
+- Sanitized persisted/client render and upload errors so local filesystem paths are logged server-side but not exposed through the API.
+- Built session asset metadata once for a multi-edit commit instead of rescanning and reparsing every scene per edit.
+- Existing uploaded edit IDs are now checked against Immich; a missing remote asset clears stale state and uploads a fresh derivative.
+- Added mobile editor overscroll containment and hardened edited filenames against leading dots.
+- Added bounded-memory original streaming as a P2 follow-up rather than widening the review fix into a renderer architecture change.
+---

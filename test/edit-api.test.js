@@ -105,6 +105,32 @@ test('edit API renders, serves, and removes a durable derivative', async () => {
   assert.equal(fs.existsSync(path.join(process.env.PHOTODESK_EDIT_DIR, edit.rendered_path)), false);
 });
 
+test('validates session membership before entering the render lock', async () => {
+  const missingSession = await nativeFetch(`${baseUrl}/api/edits`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      sessionId: 999,
+      assetId: 'asset-1',
+      adjustments: {},
+      crop: { aspect: 'Original' },
+    }),
+  });
+  assert.equal(missingSession.status, 404);
+
+  const foreignAsset = await nativeFetch(`${baseUrl}/api/edits`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      sessionId: 1,
+      assetId: 'not-in-session',
+      adjustments: {},
+      crop: { aspect: 'Original' },
+    }),
+  });
+  assert.equal(foreignAsset.status, 400);
+});
+
 test('failed re-renders preserve the previous ready derivative and recipe', async () => {
   originalFailure = null;
   const readyResponse = await nativeFetch(`${baseUrl}/api/edits`, {
@@ -141,6 +167,26 @@ test('failed re-renders preserve the previous ready derivative and recipe', asyn
   assert.equal(body.edit.rendered_path, readyEdit.rendered_path);
   assert.equal(body.edit.adjustments.exposure, 5);
   assert.deepEqual(fs.readFileSync(renderedFile), previousBytes);
+});
+
+test('render failures do not expose local filesystem paths', async () => {
+  originalFailure = new Error(`decoder failed while reading ${path.join(tempDir, 'secret-input.jpg')}`);
+  const response = await nativeFetch(`${baseUrl}/api/edits`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      sessionId: 1,
+      assetId: 'asset-1',
+      adjustments: { contrast: 15 },
+      crop: { aspect: 'Original' },
+    }),
+  });
+  assert.equal(response.status, 422);
+  const body = await response.json();
+  assert.doesNotMatch(body.error, new RegExp(tempDir.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  assert.match(body.error, /\[local path\]/);
+  assert.doesNotMatch(body.edit.render_error, new RegExp(tempDir.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  originalFailure = null;
 });
 
 test('database update failure preserves the previous pointer, recipe, and bytes', async () => {

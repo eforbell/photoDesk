@@ -25,3 +25,20 @@ Acceptance criteria:
   actionable compatibility error.
 - Document the supported setup for the Debian/Mint production host.
 
+### Bounded-memory source rendering
+
+**Priority:** P2
+**Status:** Backlog
+
+The current renderer downloads an Immich original into a Node.js buffer before
+passing it to Sharp. Replace this with a bounded-memory stream or temporary-file
+pipeline before PhotoDesk expands into large RAW workflows.
+
+Acceptance criteria:
+
+- Source download does not require holding the complete original and rendered
+  derivative in memory simultaneously.
+- Abort and network failures remove incomplete temporary files.
+- Existing per-asset serialization, atomic final writes, and previous-ready
+  preservation remain intact.
+- Add a large generated fixture or constrained-memory integration test.

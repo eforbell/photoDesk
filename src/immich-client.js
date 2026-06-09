@@ -104,6 +104,18 @@ async function getAssetInfo(assetId) {
   return res.json();
 }
 
+async function assetExists(assetId) {
+  const res = await fetch(`${config.immichUrl}/api/assets/${assetId}`, {
+    headers: authHeaders(),
+  });
+  if (res.status === 404) return false;
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`Asset existence check failed: ${res.status} ${text}`);
+  }
+  return true;
+}
+
 async function uploadAsset({
   buffer,
   filename,
@@ -154,6 +166,8 @@ async function createStack(assetIds) {
 }
 
 async function copyStackAssociation(sourceId, targetId) {
+  // Immich's stable asset-copy API can copy stack membership. StackUpdateDto
+  // only supports changing primaryAssetId, so it cannot append an asset.
   const res = await fetch(`${config.immichUrl}/api/assets/copy`, {
     method: 'PUT',
     headers: headers(),
@@ -216,6 +230,7 @@ async function updateAssetRating(assetId, rating) {
 
 module.exports = {
   fetchAllAssets,
+  assetExists,
   getAssetInfo,
   getThumbnailBuffer,
   getOriginalAssetBuffer,

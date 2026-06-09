@@ -14,6 +14,7 @@ const nativeFetch = global.fetch;
 const immichCalls = [];
 let stackFailuresRemaining = 0;
 let originalStack = null;
+let remoteEditedExists = false;
 
 global.fetch = async (url, options = {}) => {
   const href = String(url);
@@ -24,10 +25,16 @@ global.fetch = async (url, options = {}) => {
     assert.ok(options.body instanceof FormData);
     assert.equal(options.body.get('deviceId'), 'photodesk');
     assert.equal(options.body.get('filename'), 'IMG_0001-photodesk.jpg');
+    remoteEditedExists = true;
     return Response.json({ id: 'edited-asset-1', status: 'created' }, { status: 201 });
   }
   if (href.endsWith('/api/assets/asset-1')) {
     return Response.json({ id: 'asset-1', stack: originalStack });
+  }
+  if (href.endsWith('/api/assets/edited-asset-1')) {
+    return remoteEditedExists
+      ? Response.json({ id: 'edited-asset-1' })
+      : Response.json({ message: 'not found' }, { status: 404 });
   }
   if (href.endsWith('/api/stacks') && options.method === 'POST') {
     if (stackFailuresRemaining > 0) {
@@ -122,6 +129,7 @@ test.beforeEach(() => {
   immichCalls.length = 0;
   stackFailuresRemaining = 0;
   originalStack = null;
+  remoteEditedExists = false;
 });
 
 test('persists the uploaded asset ID and retries stacking without a duplicate upload', async () => {
@@ -177,5 +185,28 @@ test('adds an edited asset to the original existing stack', async () => {
   assert.equal(
     immichCalls.filter(call => call.href.endsWith('/api/stacks') && call.method === 'POST').length,
     0
+  );
+});
+
+test('re-uploads when a persisted edited asset no longer exists in Immich', async () => {
+  const sessionId = createReadySession('Missing remote edit');
+  const db = getDb();
+  db.prepare(`
+    UPDATE edits
+    SET immich_asset_id = 'edited-asset-1',
+        render_status = 'uploaded'
+    WHERE session_id = ?
+  `).run(sessionId);
+
+  const result = await commit(sessionId);
+  assert.equal(result.committed, true);
+  assert.equal(result.editsUploaded, 1);
+  assert.equal(
+    immichCalls.filter(call => call.href.endsWith('/api/assets') && call.method === 'POST').length,
+    1
+  );
+  assert.equal(
+    db.prepare('SELECT immich_asset_id FROM edits WHERE session_id = ?').get(sessionId).immich_asset_id,
+    'edited-asset-1'
   );
 });

@@ -1,10 +1,12 @@
 const express = require('express');
 const fs = require('fs');
+const path = require('path');
 const router = express.Router();
 const editLocks = new Map();
 const { getDb } = require('../db');
 const {
   fetchAllAssets,
+  assetExists,
   getThumbnailBuffer,
   getOriginalAssetBuffer,
   uploadAsset,
@@ -48,16 +50,21 @@ function sessionAssetIds(db, sessionId) {
 }
 
 function sessionAssetMetadata(db, sessionId, assetId) {
+  return sessionAssetMetadataMap(db, sessionId).get(assetId) || null;
+}
+
+function sessionAssetMetadataMap(db, sessionId) {
   const rows = db.prepare(
     'SELECT asset_ids FROM scenes WHERE session_id = ? ORDER BY scene_index'
   ).all(sessionId);
+  const metadata = new Map();
   for (const row of rows) {
-    const match = JSON.parse(row.asset_ids).find(asset => (
-      typeof asset === 'string' ? asset === assetId : asset.id === assetId
-    ));
-    if (match) return typeof match === 'string' ? { id: match } : match;
+    for (const asset of JSON.parse(row.asset_ids)) {
+      const value = typeof asset === 'string' ? { id: asset } : asset;
+      metadata.set(value.id, value);
+    }
   }
-  return null;
+  return metadata;
 }
 
 function removeRenderedFile(relativePath) {
@@ -69,8 +76,22 @@ function editedFilename(originalFileName, assetId) {
   const source = originalFileName || assetId || 'photo';
   const extensionIndex = source.lastIndexOf('.');
   const stem = extensionIndex > 0 ? source.slice(0, extensionIndex) : source;
-  const safeStem = stem.replace(/[^a-zA-Z0-9._-]+/g, '-').replace(/^-+|-+$/g, '') || 'photo';
+  const safeStem = stem
+    .replace(/[^a-zA-Z0-9._-]+/g, '-')
+    .replace(/^[.-]+|[.-]+$/g, '') || 'photo';
   return `${safeStem}-photodesk.jpg`;
+}
+
+function clientErrorMessage(error, fallback = 'Image processing failed') {
+  let message = String(error?.message || fallback).replace(/\0/g, '');
+  for (const root of [config.editDir, process.cwd(), path.parse(process.cwd()).root]) {
+    if (!root || root === path.parse(root).root) continue;
+    message = message.split(root).join('[local path]');
+  }
+  message = message
+    .replace(/[A-Za-z]:\\(?:[^\\\s:]+\\)*[^\\\s:]*/g, '[local path]')
+    .replace(/\/(?:[^/\s:]+\/)*[^/\s:]*/g, '[local path]');
+  return message.slice(0, 500);
 }
 
 function uploadTimestamp(value) {
@@ -78,9 +99,24 @@ function uploadTimestamp(value) {
   return Number.isFinite(timestamp) ? new Date(timestamp).toISOString() : new Date().toISOString();
 }
 
-async function uploadAndStackEdit(db, sessionId, edit) {
-  const metadata = sessionAssetMetadata(db, sessionId, edit.asset_id) || {};
+async function uploadAndStackEdit(db, sessionId, edit, metadata = {}) {
   let immichAssetId = edit.immich_asset_id;
+
+  if (immichAssetId) {
+    const exists = await assetExists(immichAssetId);
+    if (exists && edit.render_status === 'uploaded') return immichAssetId;
+    if (!exists) {
+      immichAssetId = null;
+      db.prepare(`
+        UPDATE edits
+        SET immich_asset_id = NULL,
+            render_status = 'ready',
+            render_error = NULL,
+            updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+        WHERE id = ?
+      `).run(edit.id);
+    }
+  }
 
   if (!immichAssetId) {
     if (!edit.rendered_path) throw new Error('Rendered edit file is missing');
@@ -128,6 +164,8 @@ async function withEditLock(sessionId, assetId, work) {
     return await work();
   } finally {
     release();
+    // Entries are self-pruning: only the newest waiter owns the map slot, and
+    // removes it when its work completes.
     if (editLocks.get(key) === current) editLocks.delete(key);
   }
 }
@@ -481,18 +519,14 @@ router.post('/edits', async (req, res, next) => {
   }
 
   try {
-    await withEditLock(sessionId, assetId, async () => {
-      const db = getDb();
-      const session = db.prepare('SELECT id FROM sessions WHERE id = ?').get(sessionId);
-      if (!session) {
-        res.status(404).json({ error: 'Session not found' });
-        return;
-      }
-      if (!sessionAssetIds(db, sessionId).includes(assetId)) {
-        res.status(400).json({ error: 'Asset does not belong to this session' });
-        return;
-      }
+    const db = getDb();
+    const session = db.prepare('SELECT id FROM sessions WHERE id = ?').get(sessionId);
+    if (!session) return res.status(404).json({ error: 'Session not found' });
+    if (!sessionAssetIds(db, sessionId).includes(assetId)) {
+      return res.status(400).json({ error: 'Asset does not belong to this session' });
+    }
 
+    const result = await withEditLock(sessionId, assetId, async () => {
       const previousEdit = db.prepare(
         'SELECT * FROM edits WHERE session_id = ? AND asset_id = ?'
       ).get(sessionId, assetId);
@@ -537,6 +571,7 @@ router.post('/edits', async (req, res, next) => {
           }
         }
       } catch (err) {
+        console.error('[edits] Render failed:', err);
         if (rendered?.relativePath
             && rendered.relativePath !== previousEdit?.rendered_path) {
           try {
@@ -548,9 +583,10 @@ router.post('/edits', async (req, res, next) => {
         const isHeic = /\.hei[cf]$/i.test(
           sessionAssetMetadata(db, sessionId, assetId)?.originalFileName || ''
         );
+        const detail = clientErrorMessage(err);
         const message = isHeic && !sharpCapabilities().heicGuaranteed
-          ? `HEIC decode failed on this host: ${err.message}`
-          : err.message;
+          ? `HEIC decode failed on this host: ${detail}`
+          : detail;
         if (previousEdit?.render_status === 'ready' && previousEdit.rendered_path) {
           db.prepare(`
             UPDATE edits
@@ -583,15 +619,15 @@ router.post('/edits', async (req, res, next) => {
         const failed = db.prepare(
           'SELECT * FROM edits WHERE session_id = ? AND asset_id = ?'
         ).get(sessionId, assetId);
-        res.status(422).json({ error: message, edit: parseEditRow(failed) });
-        return;
+        return { status: 422, body: { error: message, edit: parseEditRow(failed) } };
       }
 
       const ready = db.prepare(
         'SELECT * FROM edits WHERE session_id = ? AND asset_id = ?'
       ).get(sessionId, assetId);
-      res.json(parseEditRow(ready));
+      return { status: 200, body: parseEditRow(ready) };
     });
+    return res.status(result.status).json(result.body);
   } catch (err) {
     next(err);
   }
@@ -612,8 +648,8 @@ router.delete('/edits', async (req, res, next) => {
       removeRenderedFile(edit?.rendered_path);
       db.prepare('DELETE FROM edits WHERE session_id = ? AND asset_id = ?')
         .run(sessionId, assetId);
-      res.json({ ok: true });
     });
+    return res.json({ ok: true });
   } catch (err) {
     next(err);
   }
@@ -709,6 +745,7 @@ router.post('/sessions/:id/commit', async (req, res) => {
       AND (render_status = 'ready' OR render_status = 'uploaded')
     ORDER BY id
   `).all(sessionId);
+  const assetMetadata = uploadEdits ? sessionAssetMetadataMap(db, sessionId) : new Map();
 
   const results = {
     assetsTrashed: 0,
@@ -759,23 +796,25 @@ router.post('/sessions/:id/commit', async (req, res) => {
   // 4. Upload edited versions, preserving the original as stack primary.
   if (uploadEdits) {
     for (const edit of editRows) {
-      if (edit.render_status === 'uploaded' && edit.immich_asset_id) {
-        results.editsUploaded++;
-        continue;
-      }
       try {
         await withEditLock(sessionId, edit.asset_id, async () => {
-          await uploadAndStackEdit(db, sessionId, edit);
+          await uploadAndStackEdit(
+            db,
+            sessionId,
+            edit,
+            assetMetadata.get(edit.asset_id) || {}
+          );
         });
         results.editsUploaded++;
       } catch (err) {
+        const message = clientErrorMessage(err, 'Edited upload failed');
         db.prepare(`
           UPDATE edits
           SET render_error = ?,
               updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
           WHERE id = ?
-        `).run(err.message, edit.id);
-        results.errors.push(`Edited upload failed for ${edit.asset_id}: ${err.message}`);
+        `).run(message, edit.id);
+        results.errors.push(`Edited upload failed for ${edit.asset_id}: ${message}`);
       }
     }
   }
