@@ -1,7 +1,7 @@
 {
   "branchName": "feature/3-editor",
   "projectName": "PhotoDesk",
-  "status": "in-progress",
+  "status": "completed",
   "detailLevel": "actionable after Feature 1 and Feature 2 learnings",
   "description": "Add a humble, non-destructive photo editor accessible from the review grid and lightbox. It supports crop, core adjustments, and presets with a live browser preview, server-side rendering, local edit persistence, thumbnail/lightbox badges, and commit-time upload/stacking into Immich as edited versions. The editor must keep the existing Review -> Rate -> Stack -> Commit workflow fast and visually consistent with the design handoff.",
   "designReference": "design/design_handoff_photodesk/lightbox.jsx (Editor, Stage, Histogram), design/design_handoff_photodesk/components.jsx (adjCss, tempOverlay, vignetteOverlay, ADJ_ZERO, PRESETS), design/design_handoff_photodesk/README.md Section 4 (Editor).",
@@ -129,7 +129,7 @@
         "A failed upload does not mark the session committed/processed; the user can retry after fixing the error.",
         "After successful commit, local discovery/library caches are invalidated so newly uploaded edited assets do not appear as unreviewed originals."
       ],
-      "status": "planned"
+      "status": "completed"
     },
     {
       "id": "ED-008",
@@ -178,5 +178,5 @@
     "Batch edit synchronization across assets",
     "Advanced color grading beyond presets and basic sliders"
   ],
-  "implementationSlice": "Editor recipes and live preview are shipped on the feature branch; sharp rendering and Immich upload/stacking remain."
+  "implementationSlice": "Feature complete: live browser editing, durable Sharp rendering, persistent edited previews, and retry-safe Immich upload/stacking are shipped on the feature branch."
 }

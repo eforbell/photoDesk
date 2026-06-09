@@ -126,3 +126,18 @@
   - Render and delete operations need a per-asset critical section even in a single-process home app; async requests can otherwise reorder database and filesystem state.
   - Immich/session metadata may contain zero dimensions, so crop math must hydrate actual image dimensions before persisting normalized coordinates.
 ---
+
+## 2026-06-09 — Feature #3 Editor: Commit Integration
+- Enabled the fourth Commit action for saved edits and added live Edited counts plus explicit upload/stack copy.
+- Added multipart JPEG upload through Immich's stable asset API, preserving source capture time and using deterministic PhotoDesk device metadata.
+- Kept originals as the visible primary asset: new stacks are created original-first, while edits of assets already in a stack copy the original's existing stack association.
+- Made the upload boundary retry-safe: the returned Immich asset ID is persisted before stacking, so a stack failure leaves the session unprocessed and retries without uploading a duplicate.
+- Marked edits `uploaded` only after stack association succeeds; successful Commit still invalidates discovery cache and marks only the reviewed source session assets processed.
+- Added regression coverage for upload-success/stack-failure retries and existing-stack association. Full suite: 30 passing tests.
+- Browser-validated the summary, progress log, and reachable Commit action at desktop and 390×844. Visual verdict: 96/100.
+- Validated end-to-end against local Immich 2.7.5: the edited JPEG uploaded, the original remained stack primary, the edit row stored the remote asset ID, and the session committed only after success. Temporary validation assets were moved to Immich trash afterward.
+- **Learnings:**
+  - Persist remote identity immediately after upload, not after the whole multi-step action, or a later stack failure can create duplicate assets on retry.
+  - Existing stacks should be extended through Immich's asset-copy stack association instead of recreated around one member.
+  - `uploaded` is still a locally renderable state; preview routes and browser filters must treat it like `ready`.
+---

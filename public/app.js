@@ -130,8 +130,12 @@ function thumbnailUrl(assetId) {
 }
 
 function editImageUrl(assetId, edit = state.editMap[assetId]) {
-  if (!edit || edit.render_status !== 'ready') return null;
+  if (!edit || !['ready', 'uploaded'].includes(edit.render_status)) return null;
   return `/api/edits/${state.currentSession.id}/${encodeURIComponent(assetId)}/image?v=${encodeURIComponent(edit.updated_at)}`;
+}
+
+function hasRenderedEdit(edit) {
+  return Boolean(edit && ['ready', 'uploaded'].includes(edit.render_status));
 }
 
 function heatColor(day) {
@@ -924,7 +928,7 @@ function renderGridItem(assetId) {
 
   return `
     <div class="${classes.join(' ')}" data-asset-id="${assetId}" data-pid="${assetId}" ${inlineStyle}>
-      <img src="${editImageUrl(assetId, edit) || `/api/proxy/thumbnail/${assetId}`}" loading="lazy" alt="" ${edit && edit.render_status !== 'ready' ? `style="filter:${PhotoDeskEditor.adjustmentFilter(edit.adjustments)}"` : ''} />
+      <img src="${editImageUrl(assetId, edit) || `/api/proxy/thumbnail/${assetId}`}" loading="lazy" alt="" ${edit && !hasRenderedEdit(edit) ? `style="filter:${PhotoDeskEditor.adjustmentFilter(edit.adjustments)}"` : ''} />
       ${badges}
       ${hoverActions}
     </div>
@@ -1079,16 +1083,16 @@ function renderLightbox() {
   const img = $('lb-image');
   img.style.opacity = '0.6';
   img.src = editImageUrl(assetId, edit) || `/api/proxy/thumbnail/${assetId}`;
-  img.style.filter = edit && edit.render_status !== 'ready'
+  img.style.filter = edit && !hasRenderedEdit(edit)
     ? PhotoDeskEditor.adjustmentFilter(edit.adjustments)
     : '';
   img.onload = () => { img.style.opacity = '1'; };
   img.onerror = () => { img.style.opacity = '0.3'; };
-  $('lb-edit-temp').style.background = edit && edit.render_status !== 'ready'
+  $('lb-edit-temp').style.background = edit && !hasRenderedEdit(edit)
     ? PhotoDeskEditor.temperatureOverlay(edit.adjustments)
     : '';
   $('lb-edit-temp').classList.toggle('visible', Boolean($('lb-edit-temp').style.background));
-  $('lb-edit-vignette').style.background = edit && edit.render_status !== 'ready'
+  $('lb-edit-vignette').style.background = edit && !hasRenderedEdit(edit)
     ? PhotoDeskEditor.vignetteOverlay(edit.adjustments)
     : '';
   $('lb-edit-vignette').classList.toggle('visible', Boolean($('lb-edit-vignette').style.background));
@@ -1188,7 +1192,7 @@ function renderFilmstrip(visible, activeIndex) {
 
     html += `
       <div class="filmstrip-thumb ${isActive ? 'active' : ''}" data-index="${i}" style="${arStyle}">
-        <img src="${editImageUrl(id, edit) || `/api/proxy/thumbnail/${id}`}" loading="lazy" alt="" ${edit && edit.render_status !== 'ready' ? `style="filter:${PhotoDeskEditor.adjustmentFilter(edit.adjustments)}"` : ''} />
+        <img src="${editImageUrl(id, edit) || `/api/proxy/thumbnail/${id}`}" loading="lazy" alt="" ${edit && !hasRenderedEdit(edit) ? `style="filter:${PhotoDeskEditor.adjustmentFilter(edit.adjustments)}"` : ''} />
         ${overlays}
       </div>
     `;
@@ -1865,6 +1869,10 @@ function showSummary() {
   closeLightbox();
 
   const counts = computeCounts();
+  const edited = Object.values(state.editMap).filter(edit => (
+    ['ready', 'uploaded'].includes(edit.render_status)
+  ));
+  const pendingEdits = edited.filter(edit => edit.render_status !== 'uploaded');
 
   // Eyebrow
   $('summary-eyebrow').textContent = state.currentSession.name;
@@ -1876,7 +1884,7 @@ function showSummary() {
     { n: counts._undecided, l: 'Undecided', c: 'var(--text-dim)' },
     { n: counts._rated, l: 'Rated', c: 'var(--star)' },
     { n: counts._stacks, l: 'Stacks', c: 'var(--accent-text)' },
-    { n: 0, l: 'Edited', c: 'var(--accent-text)' },
+    { n: edited.length, l: 'Edited', c: 'var(--accent-text)' },
   ];
 
   $('summary-stats').innerHTML = stats.map(s => `
@@ -1890,6 +1898,14 @@ function showSummary() {
   $('opt-trash-sub').textContent = `${counts._rejects} photos \u2192 Immich trash (recoverable)`;
   $('opt-ratings-sub').textContent = `${counts._rated} ratings to asset metadata`;
   $('opt-stacks-sub').textContent = `${counts._stacks} manual groups, best frame as primary`;
+  $('opt-edits-sub').textContent = pendingEdits.length > 0
+    ? `${pendingEdits.length} new ${pendingEdits.length === 1 ? 'asset' : 'assets'}, stacked over originals`
+    : edited.length > 0
+      ? `${edited.length} edited ${edited.length === 1 ? 'version' : 'versions'} already uploaded`
+      : 'No saved edits ready to upload';
+  $('opt-upload-edits').checked = pendingEdits.length > 0;
+  $('opt-upload-edits').disabled = edited.length === 0;
+  $('opt-upload-edits-row').classList.toggle('disabled', edited.length === 0);
 
   // Reset commit state
   $('commit-log').innerHTML = '';
@@ -1921,6 +1937,7 @@ $('commit-btn').addEventListener('click', async () => {
   const trashRejects = $('opt-trash-rejects').checked;
   const writeRatings = $('opt-write-ratings').checked;
   const createStacks = $('opt-create-stacks').checked;
+  const uploadEdits = $('opt-upload-edits').checked;
 
   const logEl = $('commit-log');
   logEl.innerHTML = '<div class="commit-log" id="commit-log-inner"></div>';
@@ -1938,6 +1955,7 @@ $('commit-btn').addEventListener('click', async () => {
       trashRejects,
       writeRatings,
       createStacks,
+      uploadEdits,
     });
 
     if (trashRejects && result.assetsTrashed > 0) {
@@ -1948,6 +1966,9 @@ $('commit-btn').addEventListener('click', async () => {
     }
     if (createStacks && result.stacksCreated > 0) {
       addLogLine(`Created ${result.stacksCreated} stacks`);
+    }
+    if (uploadEdits && result.editsUploaded > 0) {
+      addLogLine(`Uploaded ${result.editsUploaded} edited ${result.editsUploaded === 1 ? 'version' : 'versions'} and stacked with originals`);
     }
     if (result.errors && result.errors.length) {
       for (const err of result.errors) {

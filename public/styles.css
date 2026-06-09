@@ -2027,6 +2027,10 @@ input.suggestion-name:focus {
   cursor: pointer;
   border-bottom: 1px solid var(--border-soft);
 }
+.commit-row.disabled {
+  opacity: 0.42;
+  cursor: default;
+}
 .commit-row input[type="checkbox"] {
   accent-color: var(--accent);
   width: 16px;

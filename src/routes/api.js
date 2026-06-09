@@ -7,7 +7,9 @@ const {
   fetchAllAssets,
   getThumbnailBuffer,
   getOriginalAssetBuffer,
+  uploadAsset,
   createStack,
+  stackEditedAsset,
   trashAssets,
   updateAssetRating,
   checkConnection,
@@ -61,6 +63,58 @@ function sessionAssetMetadata(db, sessionId, assetId) {
 function removeRenderedFile(relativePath) {
   if (!relativePath) return;
   fs.rmSync(safeEditPath(config.editDir, relativePath), { force: true });
+}
+
+function editedFilename(originalFileName, assetId) {
+  const source = originalFileName || assetId || 'photo';
+  const extensionIndex = source.lastIndexOf('.');
+  const stem = extensionIndex > 0 ? source.slice(0, extensionIndex) : source;
+  const safeStem = stem.replace(/[^a-zA-Z0-9._-]+/g, '-').replace(/^-+|-+$/g, '') || 'photo';
+  return `${safeStem}-photodesk.jpg`;
+}
+
+function uploadTimestamp(value) {
+  const timestamp = Date.parse(value);
+  return Number.isFinite(timestamp) ? new Date(timestamp).toISOString() : new Date().toISOString();
+}
+
+async function uploadAndStackEdit(db, sessionId, edit) {
+  const metadata = sessionAssetMetadata(db, sessionId, edit.asset_id) || {};
+  let immichAssetId = edit.immich_asset_id;
+
+  if (!immichAssetId) {
+    if (!edit.rendered_path) throw new Error('Rendered edit file is missing');
+    const filePath = safeEditPath(config.editDir, edit.rendered_path);
+    if (!fs.existsSync(filePath)) throw new Error('Rendered edit file is missing');
+    const createdAt = uploadTimestamp(metadata.fileCreatedAt || edit.updated_at);
+    const modifiedAt = uploadTimestamp(edit.updated_at);
+    const uploaded = await uploadAsset({
+      buffer: fs.readFileSync(filePath),
+      filename: editedFilename(metadata.originalFileName, edit.asset_id),
+      deviceAssetId: `photodesk:${sessionId}:${edit.asset_id}:${edit.updated_at}`,
+      fileCreatedAt: createdAt,
+      fileModifiedAt: modifiedAt,
+    });
+    if (!uploaded?.id) throw new Error('Immich upload returned no asset ID');
+    immichAssetId = uploaded.id;
+    db.prepare(`
+      UPDATE edits
+      SET immich_asset_id = ?,
+          render_error = NULL,
+          updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+      WHERE id = ?
+    `).run(immichAssetId, edit.id);
+  }
+
+  await stackEditedAsset(edit.asset_id, immichAssetId);
+  db.prepare(`
+    UPDATE edits
+    SET render_status = 'uploaded',
+        render_error = NULL,
+        updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+    WHERE id = ?
+  `).run(edit.id);
+  return immichAssetId;
 }
 
 async function withEditLock(sessionId, assetId, work) {
@@ -576,7 +630,7 @@ router.get('/edits/:sessionId/:assetId/image', (req, res) => {
     FROM edits
     WHERE session_id = ? AND asset_id = ?
   `).get(req.params.sessionId, req.params.assetId);
-  if (!edit || edit.render_status !== 'ready' || !edit.rendered_path) {
+  if (!edit || !['ready', 'uploaded'].includes(edit.render_status) || !edit.rendered_path) {
     return res.status(404).json({ error: 'Rendered edit is not ready' });
   }
   try {
@@ -632,22 +686,35 @@ router.post('/sessions/:id/commit', async (req, res) => {
       assetsTrashed: 0,
       ratingsWritten: 0,
       stacksCreated: 0,
+      editsUploaded: 0,
       errors: [],
       committed: true,
       alreadyCommitted: true,
     });
   }
 
-  const { trashRejects = true, writeRatings = true, createStacks = true } = req.body || {};
+  const {
+    trashRejects = true,
+    writeRatings = true,
+    createStacks = true,
+    uploadEdits = false,
+  } = req.body || {};
 
   const decisions = db.prepare('SELECT * FROM decisions WHERE session_id = ?').all(sessionId);
   const ratingsRows = db.prepare('SELECT * FROM ratings WHERE session_id = ?').all(sessionId);
   const stackGroupRows = db.prepare('SELECT * FROM stack_groups WHERE session_id = ?').all(sessionId);
+  const editRows = db.prepare(`
+    SELECT * FROM edits
+    WHERE session_id = ?
+      AND (render_status = 'ready' OR render_status = 'uploaded')
+    ORDER BY id
+  `).all(sessionId);
 
   const results = {
     assetsTrashed: 0,
     ratingsWritten: 0,
     stacksCreated: 0,
+    editsUploaded: 0,
     errors: [],
   };
 
@@ -685,6 +752,30 @@ router.post('/sessions/:id/commit', async (req, res) => {
         results.stacksCreated++;
       } catch (err) {
         results.errors.push(`Stack creation failed: ${err.message}`);
+      }
+    }
+  }
+
+  // 4. Upload edited versions, preserving the original as stack primary.
+  if (uploadEdits) {
+    for (const edit of editRows) {
+      if (edit.render_status === 'uploaded' && edit.immich_asset_id) {
+        results.editsUploaded++;
+        continue;
+      }
+      try {
+        await withEditLock(sessionId, edit.asset_id, async () => {
+          await uploadAndStackEdit(db, sessionId, edit);
+        });
+        results.editsUploaded++;
+      } catch (err) {
+        db.prepare(`
+          UPDATE edits
+          SET render_error = ?,
+              updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+          WHERE id = ?
+        `).run(err.message, edit.id);
+        results.errors.push(`Edited upload failed for ${edit.asset_id}: ${err.message}`);
       }
     }
   }
