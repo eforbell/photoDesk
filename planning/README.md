@@ -10,6 +10,7 @@ Feature-driven development tracking for PhotoDesk, the photo review & light-edit
 - `iteration-process.md` -- Agent iteration instructions
 - `feature-build-learnings.md` -- Durable product, UX, data, and delivery lessons
 - `database-and-deployment.md` -- SQLite migration and git deploy policy
+- `backlog.md` -- Prioritized follow-up work outside the active feature
 
 ## Feature Pipeline
 
