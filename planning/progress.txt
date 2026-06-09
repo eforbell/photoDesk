@@ -95,3 +95,69 @@
   - The density API already returned the full timeline; the apparent cutoff was a presentation limit in `monthKeysForDays`.
   - Large real libraries need explicit temporal navigation rather than silently applying a design-mock window.
 ---
+
+## 2026-06-09 — Feature #3 Editor: Recipe + Live Preview Slice
+- Added migration `003-editor-state.sql` with durable per-session/asset adjustment, normalized crop, render status, error, path, and future Immich asset fields.
+- Added validated edit persistence endpoints and returned `editMap` with session workspace data.
+- Implemented the design-handoff editor in vanilla JS: lightbox/grid entry, fixed desktop split, stacked mobile layout, deterministic histogram, presets, eight live adjustment controls, temperature/vignette overlays, crop aspect presets, thirds grid, editor rating access, reset/remove behavior, and persistent Save/Cancel actions.
+- Added EDIT badges and adjusted previews in the grid, lightbox, and filmstrip; `E` now opens the editor from both focused grid and lightbox contexts.
+- Verified persistence against a copied local session: Warm + 4:5 crop saved as normalized coordinates with pending render status, survived reload, and restored into the editor. Invalid adjustment input returned HTTP 400.
+- Added 16 passing tests covering migrations, validation, browser preview math, and crop normalization.
+- Browser validation covered desktop adjustment/crop flows and a 390x844 stacked layout. Visual verdict: 94/100.
+- **Learnings:**
+  - Browser interaction caught a stale disabled Save button after reopening; editor render paths must always restore transient button state.
+  - Keeping rating inside the editor avoids forcing users out of a small-group correction flow.
+  - Persisting render status now lets the sharp/upload slice remain explicit and retryable instead of overloading recipe save semantics.
+---
+
+## 2026-06-09 — Feature #3 Editor: Durable Render Slice
+- Added Sharp-backed rendering from Immich originals into durable local JPEG derivatives under `PHOTODESK_EDIT_DIR`.
+- Added atomic, crash-durable file replacement with temporary-file cleanup, file sync, rename, and directory sync.
+- Serialized save/delete work per session asset so overlapping requests cannot mismatch recipes and files or leave orphan derivatives.
+- Preserved the previous ready derivative and recipe when a re-render fails, while recording the new error for visible retry guidance.
+- Added ready/failed UI states, rendered-image serving for grid/lightbox/filmstrip, and cache-busting with fractional update timestamps.
+- Added explicit Sharp/libvips/HEIC capability reporting. The current local Sharp build advertises HEIF input but cannot decode iPhone HEIC compression, and the browser flow now reports that clearly without corrupting or replacing a valid edit.
+- Fixed crop geometry for legacy session assets with missing stored dimensions by hydrating the loaded preview's natural dimensions before calculating normalized crops.
+- Added 28 passing tests, including generated-image render fixtures, atomic cleanup, previous-ready preservation, database-update failure recovery, overlapping saves, delete/render races, API serving, and migration regressions.
+- Browser validation covered a live Immich JPEG save/reload at desktop and 390×844; the corrected 1:1 render was verified as an exact 983×983 JPEG. Visual verdict: 93/100.
+- **Learnings:**
+  - Codec presence in `sharp.format` is not proof that every HEIC compression variant is decodable; exercise a real host asset and preserve actionable errors.
+  - A single edit row can preserve the last good derivative after a failed retry by restoring its ready recipe/path and attaching the latest render error.
+  - Render and delete operations need a per-asset critical section even in a single-process home app; async requests can otherwise reorder database and filesystem state.
+  - Immich/session metadata may contain zero dimensions, so crop math must hydrate actual image dimensions before persisting normalized coordinates.
+---
+
+## 2026-06-09 — Feature #3 Editor: Commit Integration
+- Enabled the fourth Commit action for saved edits and added live Edited counts plus explicit upload/stack copy.
+- Added multipart JPEG upload through Immich's stable asset API, preserving source capture time and using deterministic PhotoDesk device metadata.
+- Kept originals as the visible primary asset: new stacks are created original-first, while edits of assets already in a stack copy the original's existing stack association.
+- Made the upload boundary retry-safe: the returned Immich asset ID is persisted before stacking, so a stack failure leaves the session unprocessed and retries without uploading a duplicate.
+- Marked edits `uploaded` only after stack association succeeds; successful Commit still invalidates discovery cache and marks only the reviewed source session assets processed.
+- Added regression coverage for upload-success/stack-failure retries and existing-stack association. Full suite: 30 passing tests.
+- Browser-validated the summary, progress log, and reachable Commit action at desktop and 390×844. Visual verdict: 96/100.
+- Validated end-to-end against local Immich 2.7.5: the edited JPEG uploaded, the original remained stack primary, the edit row stored the remote asset ID, and the session committed only after success. Temporary validation assets were moved to Immich trash afterward.
+- **Learnings:**
+  - Persist remote identity immediately after upload, not after the whole multi-step action, or a later stack failure can create duplicate assets on retry.
+  - Existing stacks should be extended through Immich's asset-copy stack association instead of recreated around one member.
+  - `uploaded` is still a locally renderable state; preview routes and browser filters must treat it like `ready`.
+---
+
+## 2026-06-09 — Feature #3 Editor: Contained Preview Follow-up
+- Corrected the editor viewport so opening Adjust or Crop never converts a portrait source into a clipped landscape preview.
+- The stage now calculates a contain-fit from both available width and height, preserves the source aspect ratio, and uses black stage padding around unused space.
+- Crop ratios now render as a shaded normalized selection with a rule-of-thirds grid over the complete source frame instead of changing the image wrapper ratio and relying on `object-fit: cover`.
+- Added regression coverage for portrait, landscape, and max-width contain geometry.
+- Browser-validated the reported 3:4 JPEG at desktop and 390×844, including a 1:1 crop selection. Visual verdict: 98/100.
+- **Learning:** Crop intent and preview viewport are separate concerns; the viewport should remain source-faithful while the crop rectangle communicates the pending output.
+---
+
+## 2026-06-09 — Feature #3 PR Review Hardening
+- Verified the disputed existing-stack path against both official Immich API source and local Immich 2.7.5. `PUT /api/assets/copy` is stable and successfully copied a temporary edited asset into the original's existing stack while preserving the primary; `StackUpdateDto` only accepts `primaryAssetId` and cannot append assets.
+- Moved edit session/membership validation outside the per-asset lock and made locked work return response data instead of sending Express responses internally.
+- Documented that edit lock entries self-prune after the newest waiter completes.
+- Sanitized persisted/client render and upload errors so local filesystem paths are logged server-side but not exposed through the API.
+- Built session asset metadata once for a multi-edit commit instead of rescanning and reparsing every scene per edit.
+- Existing uploaded edit IDs are now checked against Immich; a missing remote asset clears stale state and uploads a fresh derivative.
+- Added mobile editor overscroll containment and hardened edited filenames against leading dots.
+- Added bounded-memory original streaming as a P2 follow-up rather than widening the review fix into a renderer architecture change.
+---

@@ -47,3 +47,16 @@ APP_DIR=/opt/sovereign-home/apps/photoDesk SERVICE_NAME=photodesk ./deploy/deplo
 ```
 
 A starter unit lives at `deploy/photodesk.service`. Edit `User=`, paths, and `.env` location before installing it to `/etc/systemd/system/photodesk.service`.
+
+Edited JPEG derivatives default to `var/edits/` for local development. Production
+should point `PHOTODESK_EDIT_DIR` at a durable location that is not replaced by a
+git checkout, for example:
+
+```bash
+PHOTODESK_EDIT_DIR=/data/apps/photoDesk-data/edits
+```
+
+The service user must be able to create directories and atomically replace files
+under that path. The installed `sharp` build reports codec support at
+`GET /api/edits/capabilities`; check that endpoint on the deployment host before
+depending on HEIC input.

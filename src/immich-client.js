@@ -7,6 +7,10 @@ function headers() {
   };
 }
 
+function authHeaders() {
+  return { 'x-api-key': config.immichApiKey };
+}
+
 async function searchAssets({ page = 1, size = 250, dateFrom, dateTo } = {}) {
   const body = {
     page,
@@ -69,6 +73,79 @@ async function getThumbnailBuffer(assetId) {
   return { buffer, contentType };
 }
 
+async function getOriginalAssetBuffer(assetId) {
+  const res = await fetch(
+    `${config.immichUrl}/api/assets/${assetId}/original`,
+    { headers: { 'x-api-key': config.immichApiKey } }
+  );
+
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`Original asset fetch failed: ${res.status} ${text}`);
+  }
+
+  return {
+    buffer: Buffer.from(await res.arrayBuffer()),
+    contentType: res.headers.get('content-type') || 'application/octet-stream',
+    contentDisposition: res.headers.get('content-disposition') || '',
+  };
+}
+
+async function getAssetInfo(assetId) {
+  const res = await fetch(`${config.immichUrl}/api/assets/${assetId}`, {
+    headers: authHeaders(),
+  });
+
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`Asset info fetch failed: ${res.status} ${text}`);
+  }
+
+  return res.json();
+}
+
+async function assetExists(assetId) {
+  const res = await fetch(`${config.immichUrl}/api/assets/${assetId}`, {
+    headers: authHeaders(),
+  });
+  if (res.status === 404) return false;
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`Asset existence check failed: ${res.status} ${text}`);
+  }
+  return true;
+}
+
+async function uploadAsset({
+  buffer,
+  filename,
+  deviceAssetId,
+  deviceId = 'photodesk',
+  fileCreatedAt,
+  fileModifiedAt,
+}) {
+  const form = new FormData();
+  form.append('assetData', new Blob([buffer], { type: 'image/jpeg' }), filename);
+  form.append('deviceAssetId', deviceAssetId);
+  form.append('deviceId', deviceId);
+  form.append('fileCreatedAt', fileCreatedAt);
+  form.append('fileModifiedAt', fileModifiedAt);
+  form.append('filename', filename);
+
+  const res = await fetch(`${config.immichUrl}/api/assets`, {
+    method: 'POST',
+    headers: authHeaders(),
+    body: form,
+  });
+
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`Asset upload failed: ${res.status} ${text}`);
+  }
+
+  return res.json();
+}
+
 async function createStack(assetIds) {
   if (!assetIds || assetIds.length < 2) {
     throw new Error('createStack requires at least 2 asset IDs');
@@ -86,6 +163,35 @@ async function createStack(assetIds) {
   }
 
   return res.json();
+}
+
+async function copyStackAssociation(sourceId, targetId) {
+  // Immich's stable asset-copy API can copy stack membership. StackUpdateDto
+  // only supports changing primaryAssetId, so it cannot append an asset.
+  const res = await fetch(`${config.immichUrl}/api/assets/copy`, {
+    method: 'PUT',
+    headers: headers(),
+    body: JSON.stringify({
+      sourceId,
+      targetId,
+      stack: true,
+    }),
+  });
+
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`Copy stack association failed: ${res.status} ${text}`);
+  }
+}
+
+async function stackEditedAsset(originalAssetId, editedAssetId) {
+  const original = await getAssetInfo(originalAssetId);
+  if (original.stack) {
+    await copyStackAssociation(originalAssetId, editedAssetId);
+    return { existingStack: true, stackId: original.stack.id };
+  }
+  const stack = await createStack([originalAssetId, editedAssetId]);
+  return { existingStack: false, stackId: stack.id };
 }
 
 async function trashAssets(ids) {
@@ -124,8 +230,14 @@ async function updateAssetRating(assetId, rating) {
 
 module.exports = {
   fetchAllAssets,
+  assetExists,
+  getAssetInfo,
   getThumbnailBuffer,
+  getOriginalAssetBuffer,
+  uploadAsset,
   createStack,
+  copyStackAssociation,
+  stackEditedAsset,
   trashAssets,
   updateAssetRating,
   checkConnection,

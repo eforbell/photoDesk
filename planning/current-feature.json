@@ -1,8 +1,8 @@
 {
-  "currentFeature": "Feature #2: Library / Discover Screen",
-  "status": "shipped",
-  "branch": "feature/2-library-discover",
-  "prdPath": "planning/features/feature-2-library-discover.json",
+  "currentFeature": "Feature #3: Editor (Crop + Adjustments + Presets)",
+  "status": "ready-for-review",
+  "branch": "feature/3-editor",
+  "prdPath": "planning/features/feature-3-editor.json",
   "completedFeatures": [
     "Feature #0: Foundation (Express backend, SQLite, Immich API client, scene clustering, basic multi-pass culling UI)",
     "Feature #1: Visual System + Workspace Redesign",
@@ -10,7 +10,6 @@
   ],
   "skippedFeatures": [],
   "futureFeatures": [
-    "Feature #3: Editor (Crop + Adjustments + Presets)",
     "Feature #4: Commit Hardening + Edited Asset Upload"
   ]
 }
