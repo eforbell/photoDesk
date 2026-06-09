@@ -1,9 +1,12 @@
 const express = require('express');
+const fs = require('fs');
 const router = express.Router();
+const editLocks = new Map();
 const { getDb } = require('../db');
 const {
   fetchAllAssets,
   getThumbnailBuffer,
+  getOriginalAssetBuffer,
   createStack,
   trashAssets,
   updateAssetRating,
@@ -22,6 +25,11 @@ const {
   validateAdjustments,
   validateCrop,
 } = require('../editor');
+const {
+  safeEditPath,
+  sharpCapabilities,
+  writeRenderedEdit,
+} = require('../edit-renderer');
 
 function localDateBoundary(dateKey, endOfDay = false) {
   if (!dateKey || !/^\d{4}-\d{2}-\d{2}$/.test(dateKey)) return dateKey;
@@ -35,6 +43,39 @@ function sessionAssetIds(db, sessionId) {
       const values = JSON.parse(row.asset_ids);
       return values.map(asset => typeof asset === 'string' ? asset : asset.id);
     });
+}
+
+function sessionAssetMetadata(db, sessionId, assetId) {
+  const rows = db.prepare(
+    'SELECT asset_ids FROM scenes WHERE session_id = ? ORDER BY scene_index'
+  ).all(sessionId);
+  for (const row of rows) {
+    const match = JSON.parse(row.asset_ids).find(asset => (
+      typeof asset === 'string' ? asset === assetId : asset.id === assetId
+    ));
+    if (match) return typeof match === 'string' ? { id: match } : match;
+  }
+  return null;
+}
+
+function removeRenderedFile(relativePath) {
+  if (!relativePath) return;
+  fs.rmSync(safeEditPath(config.editDir, relativePath), { force: true });
+}
+
+async function withEditLock(sessionId, assetId, work) {
+  const key = `${sessionId}:${assetId}`;
+  const previous = editLocks.get(key) || Promise.resolve();
+  let release;
+  const current = new Promise(resolve => { release = resolve; });
+  editLocks.set(key, current);
+  await previous;
+  try {
+    return await work();
+  } finally {
+    release();
+    if (editLocks.get(key) === current) editLocks.delete(key);
+  }
 }
 
 // GET /api/sessions
@@ -370,7 +411,7 @@ router.delete('/ratings', (req, res) => {
 });
 
 // POST /api/edits
-router.post('/edits', (req, res) => {
+router.post('/edits', async (req, res, next) => {
   const { sessionId, assetId } = req.body;
   if (!sessionId || !assetId) {
     return res.status(400).json({ error: 'sessionId and assetId are required' });
@@ -385,42 +426,170 @@ router.post('/edits', (req, res) => {
     return res.status(400).json({ error: err.message });
   }
 
-  const db = getDb();
-  const session = db.prepare('SELECT id FROM sessions WHERE id = ?').get(sessionId);
-  if (!session) return res.status(404).json({ error: 'Session not found' });
-  if (!sessionAssetIds(db, sessionId).includes(assetId)) {
-    return res.status(400).json({ error: 'Asset does not belong to this session' });
+  try {
+    await withEditLock(sessionId, assetId, async () => {
+      const db = getDb();
+      const session = db.prepare('SELECT id FROM sessions WHERE id = ?').get(sessionId);
+      if (!session) {
+        res.status(404).json({ error: 'Session not found' });
+        return;
+      }
+      if (!sessionAssetIds(db, sessionId).includes(assetId)) {
+        res.status(400).json({ error: 'Asset does not belong to this session' });
+        return;
+      }
+
+      const previousEdit = db.prepare(
+        'SELECT * FROM edits WHERE session_id = ? AND asset_id = ?'
+      ).get(sessionId, assetId);
+
+      db.prepare(`
+        INSERT INTO edits (session_id, asset_id, adjustments, crop, render_status)
+        VALUES (?, ?, ?, ?, 'rendering')
+        ON CONFLICT(session_id, asset_id) DO UPDATE SET
+          adjustments = excluded.adjustments,
+          crop = excluded.crop,
+          render_status = 'rendering',
+          render_error = NULL,
+          updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+      `).run(sessionId, assetId, JSON.stringify(adjustments), JSON.stringify(crop));
+
+      let rendered;
+      try {
+        const original = await getOriginalAssetBuffer(assetId);
+        rendered = await writeRenderedEdit({
+          input: original.buffer,
+          adjustments,
+          crop,
+          editDir: config.editDir,
+          sessionId,
+          assetId,
+        });
+        db.prepare(`
+          UPDATE edits
+          SET rendered_path = ?,
+              render_status = 'ready',
+              render_error = NULL,
+              immich_asset_id = NULL,
+              updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+          WHERE session_id = ? AND asset_id = ?
+        `).run(rendered.relativePath, sessionId, assetId);
+        if (previousEdit?.rendered_path
+            && previousEdit.rendered_path !== rendered.relativePath) {
+          try {
+            removeRenderedFile(previousEdit.rendered_path);
+          } catch (cleanupError) {
+            console.warn('[edits] Failed to remove superseded render:', cleanupError.message);
+          }
+        }
+      } catch (err) {
+        if (rendered?.relativePath
+            && rendered.relativePath !== previousEdit?.rendered_path) {
+          try {
+            removeRenderedFile(rendered.relativePath);
+          } catch (cleanupError) {
+            console.warn('[edits] Failed to remove incomplete render:', cleanupError.message);
+          }
+        }
+        const isHeic = /\.hei[cf]$/i.test(
+          sessionAssetMetadata(db, sessionId, assetId)?.originalFileName || ''
+        );
+        const message = isHeic && !sharpCapabilities().heicGuaranteed
+          ? `HEIC decode failed on this host: ${err.message}`
+          : err.message;
+        if (previousEdit?.render_status === 'ready' && previousEdit.rendered_path) {
+          db.prepare(`
+            UPDATE edits
+            SET adjustments = ?,
+                crop = ?,
+                rendered_path = ?,
+                render_status = 'ready',
+                render_error = ?,
+                immich_asset_id = ?,
+                updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+            WHERE session_id = ? AND asset_id = ?
+          `).run(
+            previousEdit.adjustments,
+            previousEdit.crop,
+            previousEdit.rendered_path,
+            message,
+            previousEdit.immich_asset_id,
+            sessionId,
+            assetId
+          );
+        } else {
+          db.prepare(`
+            UPDATE edits
+            SET render_status = 'failed',
+                render_error = ?,
+                updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+            WHERE session_id = ? AND asset_id = ?
+          `).run(message, sessionId, assetId);
+        }
+        const failed = db.prepare(
+          'SELECT * FROM edits WHERE session_id = ? AND asset_id = ?'
+        ).get(sessionId, assetId);
+        res.status(422).json({ error: message, edit: parseEditRow(failed) });
+        return;
+      }
+
+      const ready = db.prepare(
+        'SELECT * FROM edits WHERE session_id = ? AND asset_id = ?'
+      ).get(sessionId, assetId);
+      res.json(parseEditRow(ready));
+    });
+  } catch (err) {
+    next(err);
   }
-
-  db.prepare(`
-    INSERT INTO edits (session_id, asset_id, adjustments, crop, render_status)
-    VALUES (?, ?, ?, ?, 'pending')
-    ON CONFLICT(session_id, asset_id) DO UPDATE SET
-      adjustments = excluded.adjustments,
-      crop = excluded.crop,
-      rendered_path = NULL,
-      render_status = 'pending',
-      render_error = NULL,
-      immich_asset_id = NULL,
-      updated_at = datetime('now')
-  `).run(sessionId, assetId, JSON.stringify(adjustments), JSON.stringify(crop));
-
-  const row = db.prepare(
-    'SELECT * FROM edits WHERE session_id = ? AND asset_id = ?'
-  ).get(sessionId, assetId);
-  res.json(parseEditRow(row));
 });
 
 // DELETE /api/edits
-router.delete('/edits', (req, res) => {
+router.delete('/edits', async (req, res, next) => {
   const { sessionId, assetId } = req.body;
   if (!sessionId || !assetId) {
     return res.status(400).json({ error: 'sessionId and assetId are required' });
   }
+  try {
+    await withEditLock(sessionId, assetId, async () => {
+      const db = getDb();
+      const edit = db.prepare(
+        'SELECT rendered_path FROM edits WHERE session_id = ? AND asset_id = ?'
+      ).get(sessionId, assetId);
+      removeRenderedFile(edit?.rendered_path);
+      db.prepare('DELETE FROM edits WHERE session_id = ? AND asset_id = ?')
+        .run(sessionId, assetId);
+      res.json({ ok: true });
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.get('/edits/capabilities', (req, res) => {
+  res.json(sharpCapabilities());
+});
+
+router.get('/edits/:sessionId/:assetId/image', (req, res) => {
   const db = getDb();
-  db.prepare('DELETE FROM edits WHERE session_id = ? AND asset_id = ?')
-    .run(sessionId, assetId);
-  res.json({ ok: true });
+  const edit = db.prepare(`
+    SELECT rendered_path, render_status
+    FROM edits
+    WHERE session_id = ? AND asset_id = ?
+  `).get(req.params.sessionId, req.params.assetId);
+  if (!edit || edit.render_status !== 'ready' || !edit.rendered_path) {
+    return res.status(404).json({ error: 'Rendered edit is not ready' });
+  }
+  try {
+    const filePath = safeEditPath(config.editDir, edit.rendered_path);
+    if (!fs.existsSync(filePath)) {
+      return res.status(404).json({ error: 'Rendered edit file is missing' });
+    }
+    res.set('Content-Type', 'image/jpeg');
+    res.set('Cache-Control', 'private, max-age=31536000, immutable');
+    res.sendFile(filePath);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
 });
 
 // POST /api/stack-groups

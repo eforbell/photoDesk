@@ -90,4 +90,11 @@ test('aspect selection creates a centered normalized crop', () => {
     width: 1,
     height: 0.421875,
   });
+  assert.deepEqual(cropForAspect({ width: 1323, height: 983 }, '1:1'), {
+    aspect: '1:1',
+    x: 0.12849584278155706,
+    y: 0,
+    width: 0.7430083144368859,
+    height: 1,
+  });
 });

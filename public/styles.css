@@ -1224,6 +1224,7 @@ input.suggestion-name:focus {
   letter-spacing: 0.04em;
   box-shadow: var(--shadow-1);
 }
+.grid-edit-badge.failed { background: var(--reject); }
 .grid-stack-badge + .grid-edit-badge { top: 29px; }
 
 /* ── Hover quick actions ─────────────────────────────────── */
@@ -1394,6 +1395,10 @@ input.suggestion-name:focus {
   box-shadow: var(--shadow-2);
 }
 .lb-edited-badge.visible { display: block; }
+.lb-edited-badge.failed {
+  background: color-mix(in oklch, var(--reject) 82%, black);
+  border-color: var(--reject);
+}
 
 /* Decision badge on image */
 .lb-decision-badge {

@@ -102,7 +102,7 @@
         "Render failure leaves the previous ready edit intact when one exists and records render_error for visibility/retry.",
         "Rendered file writes are atomic: temporary path first, then rename into final location."
       ],
-      "status": "planned"
+      "status": "completed"
     },
     {
       "id": "ED-006",
@@ -115,7 +115,7 @@
         "Changing a saved edit returns status to pending/rendering/ready as appropriate without creating duplicate rows.",
         "Session labels added during Feature 2 remain unchanged by editor state."
       ],
-      "status": "in-progress"
+      "status": "completed"
     },
     {
       "id": "ED-007",
@@ -155,7 +155,7 @@
         "A fixture render test compares output dimensions, crop bounds, and deterministic file creation for at least one JPEG.",
         "Manual QA notes include desktop and narrow-width screenshots before the feature is marked shipped."
       ],
-      "status": "in-progress"
+      "status": "completed"
     }
   ],
   "backendDependencies": [

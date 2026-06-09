@@ -69,6 +69,24 @@ async function getThumbnailBuffer(assetId) {
   return { buffer, contentType };
 }
 
+async function getOriginalAssetBuffer(assetId) {
+  const res = await fetch(
+    `${config.immichUrl}/api/assets/${assetId}/original`,
+    { headers: { 'x-api-key': config.immichApiKey } }
+  );
+
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`Original asset fetch failed: ${res.status} ${text}`);
+  }
+
+  return {
+    buffer: Buffer.from(await res.arrayBuffer()),
+    contentType: res.headers.get('content-type') || 'application/octet-stream',
+    contentDisposition: res.headers.get('content-disposition') || '',
+  };
+}
+
 async function createStack(assetIds) {
   if (!assetIds || assetIds.length < 2) {
     throw new Error('createStack requires at least 2 asset IDs');
@@ -125,6 +143,7 @@ async function updateAssetRating(assetId, rating) {
 module.exports = {
   fetchAllAssets,
   getThumbnailBuffer,
+  getOriginalAssetBuffer,
   createStack,
   trashAssets,
   updateAssetRating,

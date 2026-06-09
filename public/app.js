@@ -116,7 +116,9 @@ async function api(method, path, body) {
   const res = await fetch(path, opts);
   if (!res.ok) {
     const err = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
-    throw new Error(err.error || `HTTP ${res.status}`);
+    const error = new Error(err.error || `HTTP ${res.status}`);
+    error.data = err;
+    throw error;
   }
   if (res.status === 204) return null;
   return res.json();
@@ -125,6 +127,11 @@ async function api(method, path, body) {
 // ── LIBRARY / DISCOVER ─────────────────────────────────────────
 function thumbnailUrl(assetId) {
   return `/api/proxy/thumbnail/${encodeURIComponent(assetId)}`;
+}
+
+function editImageUrl(assetId, edit = state.editMap[assetId]) {
+  if (!edit || edit.render_status !== 'ready') return null;
+  return `/api/edits/${state.currentSession.id}/${encodeURIComponent(assetId)}/image?v=${encodeURIComponent(edit.updated_at)}`;
 }
 
 function heatColor(day) {
@@ -898,7 +905,8 @@ function renderGridItem(assetId) {
     badges += `<div class="grid-stack-badge">${icon('stack', 9, 2.2)}${state.stackGroups.findIndex(sg => sg.id === stackGroupId) + 1}</div>`;
   }
   if (edit) {
-    badges += '<div class="grid-edit-badge">EDIT</div>';
+    const failed = Boolean(edit.render_error);
+    badges += `<div class="grid-edit-badge ${failed ? 'failed' : ''}" title="${failed ? 'Render failed — open editor to retry' : 'Edited version ready'}">${failed ? 'EDIT !' : 'EDIT'}</div>`;
   }
 
   // Hover quick actions (only in cull mode + non-stack)
@@ -916,7 +924,7 @@ function renderGridItem(assetId) {
 
   return `
     <div class="${classes.join(' ')}" data-asset-id="${assetId}" data-pid="${assetId}" ${inlineStyle}>
-      <img src="/api/proxy/thumbnail/${assetId}" loading="lazy" alt="" ${edit ? `style="filter:${PhotoDeskEditor.adjustmentFilter(edit.adjustments)}"` : ''} />
+      <img src="${editImageUrl(assetId, edit) || `/api/proxy/thumbnail/${assetId}`}" loading="lazy" alt="" ${edit && edit.render_status !== 'ready' ? `style="filter:${PhotoDeskEditor.adjustmentFilter(edit.adjustments)}"` : ''} />
       ${badges}
       ${hoverActions}
     </div>
@@ -1070,19 +1078,26 @@ function renderLightbox() {
   // Image
   const img = $('lb-image');
   img.style.opacity = '0.6';
-  img.src = `/api/proxy/thumbnail/${assetId}`;
-  img.style.filter = edit ? PhotoDeskEditor.adjustmentFilter(edit.adjustments) : '';
+  img.src = editImageUrl(assetId, edit) || `/api/proxy/thumbnail/${assetId}`;
+  img.style.filter = edit && edit.render_status !== 'ready'
+    ? PhotoDeskEditor.adjustmentFilter(edit.adjustments)
+    : '';
   img.onload = () => { img.style.opacity = '1'; };
   img.onerror = () => { img.style.opacity = '0.3'; };
-  $('lb-edit-temp').style.background = edit
+  $('lb-edit-temp').style.background = edit && edit.render_status !== 'ready'
     ? PhotoDeskEditor.temperatureOverlay(edit.adjustments)
     : '';
   $('lb-edit-temp').classList.toggle('visible', Boolean($('lb-edit-temp').style.background));
-  $('lb-edit-vignette').style.background = edit
+  $('lb-edit-vignette').style.background = edit && edit.render_status !== 'ready'
     ? PhotoDeskEditor.vignetteOverlay(edit.adjustments)
     : '';
   $('lb-edit-vignette').classList.toggle('visible', Boolean($('lb-edit-vignette').style.background));
-  $('lb-edited-badge').classList.toggle('visible', Boolean(edit));
+  const editedBadge = $('lb-edited-badge');
+  editedBadge.textContent = edit?.render_error
+    ? 'EDIT FAILED · open editor to retry'
+    : 'EDITED · original kept';
+  editedBadge.classList.toggle('failed', Boolean(edit?.render_error));
+  editedBadge.classList.toggle('visible', Boolean(edit));
 
   // Filename
   $('lb-filename').textContent = meta.originalFileName || assetId.substring(0, 12);
@@ -1173,7 +1188,7 @@ function renderFilmstrip(visible, activeIndex) {
 
     html += `
       <div class="filmstrip-thumb ${isActive ? 'active' : ''}" data-index="${i}" style="${arStyle}">
-        <img src="/api/proxy/thumbnail/${id}" loading="lazy" alt="" ${edit ? `style="filter:${PhotoDeskEditor.adjustmentFilter(edit.adjustments)}"` : ''} />
+        <img src="${editImageUrl(id, edit) || `/api/proxy/thumbnail/${id}`}" loading="lazy" alt="" ${edit && edit.render_status !== 'ready' ? `style="filter:${PhotoDeskEditor.adjustmentFilter(edit.adjustments)}"` : ''} />
         ${overlays}
       </div>
     `;
@@ -1601,7 +1616,19 @@ function renderEditor() {
   const assetId = state.editorAssetId;
   const meta = state.assetMeta[assetId] || {};
   $('editor-filename').textContent = meta.originalFileName || assetId.substring(0, 12);
-  $('editor-image').src = `/api/proxy/thumbnail/${assetId}`;
+  const editorImage = $('editor-image');
+  editorImage.onload = () => {
+    if (meta.width > 0 && meta.height > 0) return;
+    meta.width = editorImage.naturalWidth;
+    meta.height = editorImage.naturalHeight;
+    state.editorCrop = PhotoDeskEditor.cropForAspect(
+      meta,
+      state.editorCrop?.aspect || 'Original'
+    );
+    renderEditorControls();
+    updateEditorPreview();
+  };
+  editorImage.src = `/api/proxy/thumbnail/${assetId}`;
   document.querySelectorAll('.editor-tool').forEach(button => {
     button.classList.toggle('active', button.dataset.editorTool === state.editorTool);
   });
@@ -1618,7 +1645,7 @@ async function saveEditor() {
 
   const button = $('editor-save');
   button.disabled = true;
-  button.textContent = 'Saving…';
+  button.textContent = 'Rendering…';
   try {
     if (PhotoDeskEditor.isNeutralEdit(state.editorAdjustments, state.editorCrop)) {
       await api('DELETE', '/api/edits', {
@@ -1640,6 +1667,10 @@ async function saveEditor() {
     refreshGridItem(state.editorAssetId);
     closeEditor();
   } catch (err) {
+    if (err.data?.edit) {
+      state.editMap[state.editorAssetId] = err.data.edit;
+      refreshGridItem(state.editorAssetId);
+    }
     button.disabled = false;
     updateEditorPreview();
     alert(`Failed to save edit: ${err.message}`);

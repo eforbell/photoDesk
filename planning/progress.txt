@@ -109,3 +109,20 @@
   - Keeping rating inside the editor avoids forcing users out of a small-group correction flow.
   - Persisting render status now lets the sharp/upload slice remain explicit and retryable instead of overloading recipe save semantics.
 ---
+
+## 2026-06-09 — Feature #3 Editor: Durable Render Slice
+- Added Sharp-backed rendering from Immich originals into durable local JPEG derivatives under `PHOTODESK_EDIT_DIR`.
+- Added atomic, crash-durable file replacement with temporary-file cleanup, file sync, rename, and directory sync.
+- Serialized save/delete work per session asset so overlapping requests cannot mismatch recipes and files or leave orphan derivatives.
+- Preserved the previous ready derivative and recipe when a re-render fails, while recording the new error for visible retry guidance.
+- Added ready/failed UI states, rendered-image serving for grid/lightbox/filmstrip, and cache-busting with fractional update timestamps.
+- Added explicit Sharp/libvips/HEIC capability reporting. The current local Sharp build advertises HEIF input but cannot decode iPhone HEIC compression, and the browser flow now reports that clearly without corrupting or replacing a valid edit.
+- Fixed crop geometry for legacy session assets with missing stored dimensions by hydrating the loaded preview's natural dimensions before calculating normalized crops.
+- Added 28 passing tests, including generated-image render fixtures, atomic cleanup, previous-ready preservation, database-update failure recovery, overlapping saves, delete/render races, API serving, and migration regressions.
+- Browser validation covered a live Immich JPEG save/reload at desktop and 390×844; the corrected 1:1 render was verified as an exact 983×983 JPEG. Visual verdict: 93/100.
+- **Learnings:**
+  - Codec presence in `sharp.format` is not proof that every HEIC compression variant is decodable; exercise a real host asset and preserve actionable errors.
+  - A single edit row can preserve the last good derivative after a failed retry by restoring its ready recipe/path and attaching the latest render error.
+  - Render and delete operations need a per-asset critical section even in a single-process home app; async requests can otherwise reorder database and filesystem state.
+  - Immich/session metadata may contain zero dimensions, so crop math must hydrate actual image dimensions before persisting normalized coordinates.
+---
