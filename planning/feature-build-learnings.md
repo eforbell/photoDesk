@@ -44,3 +44,14 @@ Durable lessons from the foundation, visual workspace, and library/discovery bui
 - Migration validation must cover fresh creation, idempotent rerun, and upgrade/adoption of the previously shipped schema.
 - Deploy order is fixed: update git checkout, install locked production dependencies, migrate, restart, then inspect service health/status.
 - Runtime databases, rendered edits, secrets, and caches must live in ignored/durable paths and survive git deploys.
+
+## Partner timelines expose readable but non-writable assets
+
+Immich metadata search may include assets from partners whose timelines are
+enabled. Those assets can be visible and previewable while trash, rating, stack,
+and other update operations remain unauthorized for the connected API key.
+
+For the single-user MVP, filter discovery to the current Immich user's
+`ownerId`, persist that owner on session assets, and reject older mixed-owner
+sessions before any commit mutation. Future partner support must be an explicit
+library scope with visible ownership and per-operation capability handling.

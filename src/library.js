@@ -1,4 +1,4 @@
-const { fetchAllAssets } = require('./immich-client');
+const { fetchOwnedAssets } = require('./immich-client');
 const config = require('./config');
 
 const CACHE_TTL_MS = 60 * 60 * 1000;
@@ -67,6 +67,7 @@ function buildSnapshot(assets, processedIds, timeZone = config.timezone) {
   const totalUntriaged = sortedDays.reduce((sum, day) => sum + day.untriagedCount, 0);
 
   return {
+    libraryScope: 'owned',
     computedAt: new Date().toISOString(),
     timezone: timeZone,
     totalLibrary,
@@ -172,7 +173,9 @@ function readCachedSnapshot(db, refresh = false) {
   if (!row) return null;
   const age = Date.now() - Date.parse(row.computed_at);
   if (!Number.isFinite(age) || age > CACHE_TTL_MS) return null;
-  return JSON.parse(row.data);
+  const snapshot = JSON.parse(row.data);
+  if (snapshot.libraryScope !== 'owned') return null;
+  return snapshot;
 }
 
 function processedAssetIds(db) {
@@ -193,7 +196,7 @@ async function getLibrarySnapshot(db, { refresh = false } = {}) {
   const cached = readCachedSnapshot(db, refresh);
   if (cached) return cached;
 
-  const assets = await fetchAllAssets();
+  const assets = await fetchOwnedAssets();
   const processedIds = processedAssetIds(db);
   const snapshot = buildSnapshot(assets, processedIds);
   db.prepare(`

@@ -33,7 +33,7 @@
       "db/schema.sql remains the complete current schema snapshot"
     ],
     "api": [
-      "POST /api/sessions/:id/commit?dryRun=true returns pending and already-applied counts without calling Immich or writing local state",
+      "POST /api/sessions/:id/commit?dryRun=true returns pending and already-applied counts without mutating Immich or writing local state",
       "Real commits return structured per-step succeeded, failed, alreadyApplied, and error details while preserving the existing aggregate counters",
       "Trash, rating, and stack successes are recorded independently so retries send only unfinished work",
       "Trash rejects are sent and checkpointed one asset at a time, avoiding reliance on bulk-delete response atomicity",
@@ -52,7 +52,7 @@
       "Incomplete commits restore the option controls and expose a Retry action"
     ],
     "verification": [
-      "Regression coverage proves dry-run performs no Immich calls and writes no commit history",
+      "Regression coverage proves dry-run performs no Immich mutations and writes no commit history",
       "Regression coverage forces a partial rating failure after successful trash and stack operations, then proves retry sends only the rating",
       "Existing edited-upload retry, existing-stack, and missing-remote-edit tests continue to pass",
       "Full automated suite passes with 41 tests",
