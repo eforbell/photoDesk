@@ -184,3 +184,4 @@
 - Added regression coverage for no-write preview, partial-failure recovery, and invalid options. Full suite: 38 passing tests.
 - Browser-validated confirmation and failure/retry states at desktop and 390×844. Visual verdict: 96/100.
 - **Learning:** Remote actions must be checkpointed independently; treating the whole commit as one atomic operation creates duplicate stack/trash work after any later failure.
+- Follow-up review hardened trash further by sending one reject per request, documented the separate two-stage edit checkpoint, reconciled orphaned running attempts as interrupted, normalized committed response shape, and guarded confirmation against double submission.

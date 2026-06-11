@@ -223,12 +223,19 @@ function recordCommitAction(db, sessionId, actionType, actionKey, payload, statu
 
 function commitContext(db, sessionId) {
   return {
-    decisions: db.prepare('SELECT * FROM decisions WHERE session_id = ?').all(sessionId),
-    ratings: db.prepare('SELECT * FROM ratings WHERE session_id = ?').all(sessionId),
-    stacks: db.prepare('SELECT * FROM stack_groups WHERE session_id = ? ORDER BY id').all(sessionId)
-      .map(row => ({ ...row, assetIds: JSON.parse(row.asset_ids) })),
+    decisions: db.prepare(
+      'SELECT asset_id, decision FROM decisions WHERE session_id = ?'
+    ).all(sessionId),
+    ratings: db.prepare(
+      'SELECT asset_id, rating FROM ratings WHERE session_id = ?'
+    ).all(sessionId),
+    stacks: db.prepare(
+      'SELECT id, asset_ids FROM stack_groups WHERE session_id = ? ORDER BY id'
+    ).all(sessionId).map(row => ({ id: row.id, assetIds: JSON.parse(row.asset_ids) })),
     edits: db.prepare(`
-      SELECT * FROM edits
+      SELECT id, asset_id, rendered_path, render_status, render_error,
+             immich_asset_id, updated_at
+      FROM edits
       WHERE session_id = ?
         AND (render_status = 'ready' OR render_status = 'uploaded')
       ORDER BY id
@@ -276,6 +283,7 @@ function commitPreview(db, sessionId, options, context = commitContext(db, sessi
       total: edits.length,
       pending: options.uploadEdits ? edits.filter(edit => !edit.alreadyApplied).length : 0,
       alreadyApplied: options.uploadEdits ? edits.filter(edit => edit.alreadyApplied).length : 0,
+      recheckedAtCommit: true,
     },
   ];
 
@@ -857,6 +865,8 @@ router.post('/sessions/:id/commit', async (req, res) => {
       steps: [],
       pendingActions: 0,
       alreadyAppliedActions: 0,
+      warnings: [],
+      items: { rejects: [], ratings: [], stacks: [], edits: [] },
     });
   }
 
@@ -879,9 +889,19 @@ router.post('/sessions/:id/commit', async (req, res) => {
   let runId;
   let assetMetadata;
   try {
+    db.prepare(`
+      UPDATE commit_runs
+      SET status = 'interrupted',
+          result = COALESCE(result, ?),
+          completed_at = COALESCE(completed_at, datetime('now'))
+      WHERE session_id = ? AND status = 'running'
+    `).run(JSON.stringify({
+      committed: false,
+      errors: ['PhotoDesk restarted before this commit attempt completed.'],
+    }), sessionId);
     const run = db.prepare(`
-      INSERT INTO commit_runs (session_id, dry_run, status, options)
-      VALUES (?, 0, 'running', ?)
+      INSERT INTO commit_runs (session_id, status, options)
+      VALUES (?, 'running', ?)
     `).run(sessionId, JSON.stringify(options));
     runId = Number(run.lastInsertRowid);
     assetMetadata = options.uploadEdits ? sessionAssetMetadataMap(db, sessionId) : new Map();
@@ -900,6 +920,8 @@ router.post('/sessions/:id/commit', async (req, res) => {
     errors: [],
     steps: preview.steps.map(step => ({
       ...step,
+      pending: step.id === 'edits' && step.selected ? step.total : step.pending,
+      alreadyApplied: step.id === 'edits' ? 0 : step.alreadyApplied,
       succeeded: 0,
       failed: 0,
       errors: [],
@@ -923,21 +945,16 @@ router.post('/sessions/:id/commit', async (req, res) => {
       const pendingRejects = preview.items.rejects.filter(item => !commitActionApplied(
         db, sessionId, 'trash', item.key, item.payload
       ));
-      if (pendingRejects.length > 0) {
+      for (const item of pendingRejects) {
         try {
-          await trashAssets(pendingRejects.map(item => item.payload.assetId));
-          for (const item of pendingRejects) {
-            recordCommitAction(db, sessionId, 'trash', item.key, item.payload, 'succeeded');
-          }
-          results.assetsTrashed = pendingRejects.length;
-          step('trash').succeeded = pendingRejects.length;
+          await trashAssets([item.payload.assetId]);
+          recordCommitAction(db, sessionId, 'trash', item.key, item.payload, 'succeeded');
+          results.assetsTrashed++;
+          step('trash').succeeded++;
         } catch (err) {
           const message = clientErrorMessage(err, 'Trash failed');
-          for (const item of pendingRejects) {
-            recordCommitAction(db, sessionId, 'trash', item.key, item.payload, 'failed', message);
-          }
-          addError('trash', `Trash failed: ${message}`);
-          step('trash').failed = pendingRejects.length;
+          recordCommitAction(db, sessionId, 'trash', item.key, item.payload, 'failed', message);
+          addError('trash', `Trash failed for ${item.payload.assetId}: ${message}`);
         }
       }
     }
@@ -993,6 +1010,7 @@ router.post('/sessions/:id/commit', async (req, res) => {
           ));
           if (uploadResult.alreadyApplied) {
             results.editsAlreadyUploaded++;
+            step('edits').alreadyApplied++;
           } else {
             results.editsUploaded++;
             step('edits').succeeded++;

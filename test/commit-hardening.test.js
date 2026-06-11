@@ -12,6 +12,7 @@ process.env.IMMICH_API_KEY = 'test-key';
 const nativeFetch = global.fetch;
 const calls = [];
 let ratingFailuresRemaining = 0;
+const trashFailures = new Set();
 
 global.fetch = async (url, options = {}) => {
   const href = String(url);
@@ -20,7 +21,13 @@ global.fetch = async (url, options = {}) => {
   const method = options.method || 'GET';
   calls.push({ href, method, body: options.body });
   if (href.endsWith('/api/assets') && method === 'DELETE') {
-    assert.deepEqual(JSON.parse(options.body), { ids: ['asset-1'], force: false });
+    const payload = JSON.parse(options.body);
+    assert.equal(payload.force, false);
+    assert.equal(payload.ids.length, 1);
+    if (trashFailures.has(payload.ids[0])) {
+      trashFailures.delete(payload.ids[0]);
+      return Response.json({ message: 'temporary trash failure' }, { status: 500 });
+    }
     return new Response(null, { status: 204 });
   }
   if (href.endsWith('/api/assets/asset-2') && method === 'PUT') {
@@ -103,6 +110,7 @@ test.after(async () => {
 test.beforeEach(() => {
   calls.length = 0;
   ratingFailuresRemaining = 0;
+  trashFailures.clear();
 });
 
 test('dry-run previews actions without calling Immich or writing commit history', async () => {
@@ -182,6 +190,83 @@ test('partial failure is durable and retry sends only unfinished actions', async
       .get(sessionId).count,
     2
   );
+});
+
+test('trash rejects are checkpointed independently when one asset fails', async () => {
+  const sessionId = createSession();
+  const db = getDb();
+  db.prepare(`
+    INSERT INTO decisions (session_id, asset_id, decision)
+    VALUES (?, 'asset-4', 'reject')
+  `).run(sessionId);
+  trashFailures.add('asset-4');
+  const options = {
+    trashRejects: true,
+    writeRatings: false,
+    createStacks: false,
+    uploadEdits: false,
+  };
+
+  const first = await postCommit(sessionId, options);
+  assert.equal(first.body.committed, false);
+  assert.equal(first.body.assetsTrashed, 1);
+  assert.equal(first.body.steps.find(step => step.id === 'trash').succeeded, 1);
+  assert.equal(first.body.steps.find(step => step.id === 'trash').failed, 1);
+  assert.match(first.body.errors[0], /asset-4/);
+  assert.deepEqual(
+    calls.filter(call => call.method === 'DELETE').map(call => JSON.parse(call.body).ids),
+    [['asset-1'], ['asset-4']]
+  );
+
+  calls.length = 0;
+  const preview = await postCommit(sessionId, options, true);
+  assert.equal(preview.body.pendingActions, 1);
+  assert.equal(preview.body.alreadyAppliedActions, 1);
+
+  const second = await postCommit(sessionId, options);
+  assert.equal(second.body.committed, true);
+  assert.equal(second.body.assetsTrashed, 1);
+  assert.deepEqual(
+    calls.filter(call => call.method === 'DELETE').map(call => JSON.parse(call.body).ids),
+    [['asset-4']]
+  );
+});
+
+test('orphaned running commit attempts are marked interrupted before retry', async () => {
+  const sessionId = createSession();
+  const db = getDb();
+  const orphanId = Number(db.prepare(`
+    INSERT INTO commit_runs (session_id, status, options)
+    VALUES (?, 'running', '{}')
+  `).run(sessionId).lastInsertRowid);
+
+  const result = await postCommit(sessionId, {
+    trashRejects: false,
+    writeRatings: false,
+    createStacks: false,
+    uploadEdits: false,
+  });
+  assert.equal(result.body.committed, true);
+
+  const orphan = db.prepare(`
+    SELECT status, result, completed_at
+    FROM commit_runs
+    WHERE id = ?
+  `).get(orphanId);
+  assert.equal(orphan.status, 'interrupted');
+  assert.match(orphan.result, /restarted/);
+  assert.ok(orphan.completed_at);
+});
+
+test('already committed responses retain the normal preview envelope', async () => {
+  const sessionId = createSession();
+  const db = getDb();
+  db.prepare('UPDATE sessions SET committed = 1 WHERE id = ?').run(sessionId);
+
+  const result = await postCommit(sessionId, {}, true);
+  assert.equal(result.body.committed, true);
+  assert.deepEqual(result.body.warnings, []);
+  assert.deepEqual(result.body.items, { rejects: [], ratings: [], stacks: [], edits: [] });
 });
 
 test('commit option types are validated before any work begins', async () => {

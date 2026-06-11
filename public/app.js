@@ -1978,6 +1978,7 @@ function selectedCommitOptions() {
 }
 
 let pendingCommitOptions = null;
+let commitRequestInFlight = false;
 
 function setCommitOptionControlsDisabled(disabled) {
   $('opt-trash-rejects').disabled = disabled;
@@ -1990,6 +1991,7 @@ function setCommitOptionControlsDisabled(disabled) {
 }
 
 function closeCommitConfirmation() {
+  if (commitRequestInFlight) return;
   pendingCommitOptions = null;
   $('commit-confirmation').classList.add('hidden');
   $('summary-actions').classList.remove('hidden');
@@ -2027,6 +2029,9 @@ function showCommitConfirmation(preview, options) {
   $('commit-confirm-note').textContent = preview.pendingActions > 0
     ? 'PhotoDesk records each successful action. If a later action fails, Retry sends only unfinished work.'
     : 'No new Immich operations are pending. Confirming will mark this review session processed.';
+  if (preview.steps.some(step => step.id === 'edits' && step.selected && step.recheckedAtCommit)) {
+    $('commit-confirm-note').textContent += ' Uploaded edits are rechecked against Immich when the commit starts.';
+  }
   $('commit-confirm-apply').textContent = preview.pendingActions > 0
     ? `Confirm ${preview.pendingActions} ${preview.pendingActions === 1 ? 'action' : 'actions'}`
     : 'Mark reviewed';
@@ -2036,6 +2041,10 @@ function showCommitConfirmation(preview, options) {
 }
 
 async function executeCommit(options) {
+  if (commitRequestInFlight) return;
+  commitRequestInFlight = true;
+  $('commit-confirm-apply').disabled = true;
+  $('commit-confirm-cancel').disabled = true;
   pendingCommitOptions = null;
   $('commit-confirmation').classList.add('hidden');
   $('summary-actions').classList.remove('hidden');
@@ -2096,6 +2105,10 @@ async function executeCommit(options) {
     setCommitOptionControlsDisabled(false);
     $('commit-btn').disabled = false;
     $('commit-btn').innerHTML = `Retry ${icon('arrowR', 15)}`;
+  } finally {
+    commitRequestInFlight = false;
+    $('commit-confirm-apply').disabled = false;
+    $('commit-confirm-cancel').disabled = false;
   }
 }
 
