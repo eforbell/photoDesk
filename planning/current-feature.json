@@ -1,15 +1,16 @@
 {
-  "currentFeature": "Feature #3: Editor (Crop + Adjustments + Presets)",
+  "currentFeature": "Feature #4: Commit Hardening + Edited Asset Upload",
   "status": "ready-for-review",
-  "branch": "feature/3-editor",
-  "prdPath": "planning/features/feature-3-editor.json",
+  "branch": "feature/4-commit-hardening",
+  "prdPath": "planning/features/feature-4-commit-hardening.json",
   "completedFeatures": [
     "Feature #0: Foundation (Express backend, SQLite, Immich API client, scene clustering, basic multi-pass culling UI)",
     "Feature #1: Visual System + Workspace Redesign",
-    "Feature #2: Library / Discover Screen"
+    "Feature #2: Library / Discover Screen",
+    "Feature #3: Editor (Crop + Adjustments + Presets)"
   ],
   "skippedFeatures": [],
   "futureFeatures": [
-    "Feature #4: Commit Hardening + Edited Asset Upload"
+    "Household Profiles + Scoped Immich Credentials (unscheduled backlog discovery)"
   ]
 }

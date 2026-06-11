@@ -3,6 +3,7 @@ const fs = require('fs');
 const path = require('path');
 const router = express.Router();
 const editLocks = new Map();
+const commitLocks = new Set();
 const { getDb } = require('../db');
 const {
   fetchAllAssets,
@@ -105,7 +106,9 @@ async function uploadAndStackEdit(db, sessionId, edit, metadata = {}) {
 
   if (immichAssetId) {
     const exists = await assetExists(immichAssetId);
-    if (exists && edit.render_status === 'uploaded') return immichAssetId;
+    if (exists && edit.render_status === 'uploaded') {
+      return { immichAssetId, alreadyApplied: true };
+    }
     if (!exists) {
       immichAssetId = null;
       db.prepare(`
@@ -151,7 +154,7 @@ async function uploadAndStackEdit(db, sessionId, edit, metadata = {}) {
         updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
     WHERE id = ?
   `).run(edit.id);
-  return immichAssetId;
+  return { immichAssetId, alreadyApplied: false };
 }
 
 async function withEditLock(sessionId, assetId, work) {
@@ -169,6 +172,122 @@ async function withEditLock(sessionId, assetId, work) {
     // removes it when its work completes.
     if (editLocks.get(key) === current) editLocks.delete(key);
   }
+}
+
+function parseCommitOptions(body = {}) {
+  const defaults = {
+    trashRejects: true,
+    writeRatings: true,
+    createStacks: true,
+    uploadEdits: false,
+  };
+  for (const key of Object.keys(defaults)) {
+    if (body[key] !== undefined && typeof body[key] !== 'boolean') {
+      throw new TypeError(`${key} must be a boolean`);
+    }
+  }
+  return Object.fromEntries(
+    Object.entries(defaults).map(([key, fallback]) => [key, body[key] ?? fallback])
+  );
+}
+
+function commitActionApplied(db, sessionId, actionType, actionKey, payload) {
+  const row = db.prepare(`
+    SELECT status, payload
+    FROM commit_actions
+    WHERE session_id = ? AND action_type = ? AND action_key = ?
+  `).get(sessionId, actionType, String(actionKey));
+  return Boolean(row && row.status === 'succeeded' && row.payload === JSON.stringify(payload));
+}
+
+function recordCommitAction(db, sessionId, actionType, actionKey, payload, status, lastError = null) {
+  db.prepare(`
+    INSERT INTO commit_actions (
+      session_id, action_type, action_key, payload, status, attempts, last_error, updated_at
+    ) VALUES (?, ?, ?, ?, ?, 1, ?, datetime('now'))
+    ON CONFLICT(session_id, action_type, action_key) DO UPDATE SET
+      payload = excluded.payload,
+      status = excluded.status,
+      attempts = commit_actions.attempts + 1,
+      last_error = excluded.last_error,
+      updated_at = datetime('now')
+  `).run(
+    sessionId,
+    actionType,
+    String(actionKey),
+    JSON.stringify(payload),
+    status,
+    lastError
+  );
+}
+
+function commitContext(db, sessionId) {
+  return {
+    decisions: db.prepare('SELECT * FROM decisions WHERE session_id = ?').all(sessionId),
+    ratings: db.prepare('SELECT * FROM ratings WHERE session_id = ?').all(sessionId),
+    stacks: db.prepare('SELECT * FROM stack_groups WHERE session_id = ? ORDER BY id').all(sessionId)
+      .map(row => ({ ...row, assetIds: JSON.parse(row.asset_ids) })),
+    edits: db.prepare(`
+      SELECT * FROM edits
+      WHERE session_id = ?
+        AND (render_status = 'ready' OR render_status = 'uploaded')
+      ORDER BY id
+    `).all(sessionId),
+  };
+}
+
+function commitPreview(db, sessionId, options, context = commitContext(db, sessionId)) {
+  const rejects = context.decisions
+    .filter(row => row.decision === 'reject')
+    .map(row => ({ key: row.asset_id, payload: { assetId: row.asset_id } }));
+  const ratings = context.ratings
+    .map(row => ({ key: row.asset_id, payload: { assetId: row.asset_id, rating: row.rating } }));
+  const stacks = context.stacks
+    .map(row => ({ key: row.id, payload: { assetIds: row.assetIds } }));
+  const edits = context.edits.map(row => ({
+    key: row.asset_id,
+    alreadyApplied: row.render_status === 'uploaded' && Boolean(row.immich_asset_id),
+  }));
+
+  function ledgerStep(id, label, selected, items, actionType) {
+    const alreadyApplied = selected
+      ? items.filter(item => commitActionApplied(
+        db, sessionId, actionType, item.key, item.payload
+      )).length
+      : 0;
+    return {
+      id,
+      label,
+      selected,
+      total: items.length,
+      pending: selected ? items.length - alreadyApplied : 0,
+      alreadyApplied,
+    };
+  }
+
+  const steps = [
+    ledgerStep('trash', 'Trash rejects', options.trashRejects, rejects, 'trash'),
+    ledgerStep('ratings', 'Write star ratings', options.writeRatings, ratings, 'rating'),
+    ledgerStep('stacks', 'Create stacks', options.createStacks, stacks, 'stack'),
+    {
+      id: 'edits',
+      label: 'Upload edited versions',
+      selected: options.uploadEdits,
+      total: edits.length,
+      pending: options.uploadEdits ? edits.filter(edit => !edit.alreadyApplied).length : 0,
+      alreadyApplied: options.uploadEdits ? edits.filter(edit => edit.alreadyApplied).length : 0,
+    },
+  ];
+
+  return {
+    steps,
+    pendingActions: steps.reduce((sum, step) => sum + step.pending, 0),
+    alreadyAppliedActions: steps.reduce((sum, step) => sum + step.alreadyApplied, 0),
+    warnings: steps.find(step => step.id === 'trash')?.pending > 0
+      ? ['Rejected photos will be moved to Immich trash. This is recoverable in Immich.']
+      : [],
+    items: { rejects, ratings, stacks, edits },
+  };
 }
 
 // GET /api/sessions
@@ -713,143 +832,233 @@ router.delete('/stack-groups/:id', (req, res) => {
 router.post('/sessions/:id/commit', async (req, res) => {
   const db = getDb();
   const sessionId = req.params.id;
+  const dryRun = req.query.dryRun === 'true';
 
   const session = db.prepare('SELECT * FROM sessions WHERE id = ?').get(sessionId);
   if (!session) return res.status(404).json({ error: 'Session not found' });
+  let options;
+  try {
+    options = parseCommitOptions(req.body || {});
+  } catch (err) {
+    return res.status(400).json({ error: err.message });
+  }
+
   if (session.committed) {
     return res.json({
+      dryRun,
       assetsTrashed: 0,
       ratingsWritten: 0,
       stacksCreated: 0,
       editsUploaded: 0,
+      editsAlreadyUploaded: 0,
       errors: [],
       committed: true,
       alreadyCommitted: true,
+      steps: [],
+      pendingActions: 0,
+      alreadyAppliedActions: 0,
     });
   }
 
-  const {
-    trashRejects = true,
-    writeRatings = true,
-    createStacks = true,
-    uploadEdits = false,
-  } = req.body || {};
+  const context = commitContext(db, sessionId);
+  const preview = commitPreview(db, sessionId, options, context);
+  if (dryRun) {
+    return res.json({
+      dryRun: true,
+      committed: false,
+      alreadyCommitted: false,
+      ...preview,
+    });
+  }
 
-  const decisions = db.prepare('SELECT * FROM decisions WHERE session_id = ?').all(sessionId);
-  const ratingsRows = db.prepare('SELECT * FROM ratings WHERE session_id = ?').all(sessionId);
-  const stackGroupRows = db.prepare('SELECT * FROM stack_groups WHERE session_id = ?').all(sessionId);
-  const editRows = db.prepare(`
-    SELECT * FROM edits
-    WHERE session_id = ?
-      AND (render_status = 'ready' OR render_status = 'uploaded')
-    ORDER BY id
-  `).all(sessionId);
-  const assetMetadata = uploadEdits ? sessionAssetMetadataMap(db, sessionId) : new Map();
+  if (commitLocks.has(String(sessionId))) {
+    return res.status(409).json({ error: 'A commit is already running for this session' });
+  }
+  commitLocks.add(String(sessionId));
+
+  let runId;
+  let assetMetadata;
+  try {
+    const run = db.prepare(`
+      INSERT INTO commit_runs (session_id, dry_run, status, options)
+      VALUES (?, 0, 'running', ?)
+    `).run(sessionId, JSON.stringify(options));
+    runId = Number(run.lastInsertRowid);
+    assetMetadata = options.uploadEdits ? sessionAssetMetadataMap(db, sessionId) : new Map();
+  } catch (err) {
+    commitLocks.delete(String(sessionId));
+    return res.status(500).json({ error: clientErrorMessage(err, 'Commit setup failed') });
+  }
 
   const results = {
+    dryRun: false,
     assetsTrashed: 0,
     ratingsWritten: 0,
     stacksCreated: 0,
     editsUploaded: 0,
+    editsAlreadyUploaded: 0,
     errors: [],
+    steps: preview.steps.map(step => ({
+      ...step,
+      succeeded: 0,
+      failed: 0,
+      errors: [],
+    })),
+    pendingActions: preview.pendingActions,
+    alreadyAppliedActions: preview.alreadyAppliedActions,
+    warnings: preview.warnings,
   };
 
-  // 1. Trash rejects
-  if (trashRejects) {
-    const rejectIds = decisions.filter(d => d.decision === 'reject').map(d => d.asset_id);
-    if (rejectIds.length > 0) {
-      try {
-        await trashAssets(rejectIds);
-        results.assetsTrashed = rejectIds.length;
-      } catch (err) {
-        results.errors.push(`Trash failed: ${err.message}`);
+  const step = id => results.steps.find(item => item.id === id);
+  const addError = (stepId, message) => {
+    results.errors.push(message);
+    const target = step(stepId);
+    target.failed++;
+    target.errors.push(message);
+  };
+
+  try {
+    // 1. Trash rejects
+    if (options.trashRejects) {
+      const pendingRejects = preview.items.rejects.filter(item => !commitActionApplied(
+        db, sessionId, 'trash', item.key, item.payload
+      ));
+      if (pendingRejects.length > 0) {
+        try {
+          await trashAssets(pendingRejects.map(item => item.payload.assetId));
+          for (const item of pendingRejects) {
+            recordCommitAction(db, sessionId, 'trash', item.key, item.payload, 'succeeded');
+          }
+          results.assetsTrashed = pendingRejects.length;
+          step('trash').succeeded = pendingRejects.length;
+        } catch (err) {
+          const message = clientErrorMessage(err, 'Trash failed');
+          for (const item of pendingRejects) {
+            recordCommitAction(db, sessionId, 'trash', item.key, item.payload, 'failed', message);
+          }
+          addError('trash', `Trash failed: ${message}`);
+          step('trash').failed = pendingRejects.length;
+        }
       }
     }
-  }
 
-  // 2. Write ratings
-  if (writeRatings) {
-    for (const row of ratingsRows) {
-      try {
-        await updateAssetRating(row.asset_id, row.rating);
-        results.ratingsWritten++;
-      } catch (err) {
-        results.errors.push(`Rating update failed for ${row.asset_id}: ${err.message}`);
-      }
-    }
-  }
-
-  // 3. Create stacks
-  if (createStacks) {
-    for (const sg of stackGroupRows) {
-      const assetIds = JSON.parse(sg.asset_ids);
-      try {
-        await createStack(assetIds);
-        results.stacksCreated++;
-      } catch (err) {
-        results.errors.push(`Stack creation failed: ${err.message}`);
-      }
-    }
-  }
-
-  // 4. Upload edited versions, preserving the original as stack primary.
-  if (uploadEdits) {
-    for (const edit of editRows) {
-      try {
-        await withEditLock(sessionId, edit.asset_id, async () => {
-          await uploadAndStackEdit(
-            db,
-            sessionId,
-            edit,
-            assetMetadata.get(edit.asset_id) || {}
+    // 2. Write ratings
+    if (options.writeRatings) {
+      for (const item of preview.items.ratings) {
+        if (commitActionApplied(db, sessionId, 'rating', item.key, item.payload)) continue;
+        try {
+          await updateAssetRating(item.payload.assetId, item.payload.rating);
+          recordCommitAction(db, sessionId, 'rating', item.key, item.payload, 'succeeded');
+          results.ratingsWritten++;
+          step('ratings').succeeded++;
+        } catch (err) {
+          const message = clientErrorMessage(err, 'Rating update failed');
+          recordCommitAction(db, sessionId, 'rating', item.key, item.payload, 'failed', message);
+          addError(
+            'ratings',
+            `Rating update failed for ${item.payload.assetId}: ${message}`
           );
-        });
-        results.editsUploaded++;
-      } catch (err) {
-        const message = clientErrorMessage(err, 'Edited upload failed');
-        db.prepare(`
-          UPDATE edits
-          SET render_error = ?,
-              updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-          WHERE id = ?
-        `).run(message, edit.id);
-        results.errors.push(`Edited upload failed for ${edit.asset_id}: ${message}`);
+        }
       }
     }
-  }
 
-  if (results.errors.length === 0) {
-    const assetIds = sessionAssetIds(db, sessionId);
-    const uploadedEditIds = db.prepare(`
-      SELECT immich_asset_id
-      FROM edits
-      WHERE session_id = ?
-        AND render_status = 'uploaded'
-        AND immich_asset_id IS NOT NULL
-    `).all(sessionId).map(row => row.immich_asset_id);
-    const processedIds = [...new Set([...assetIds, ...uploadedEditIds])];
-    const markCommitted = db.transaction(() => {
-      const insertProcessed = db.prepare(`
-        INSERT OR IGNORE INTO processed_assets (asset_id, session_id)
-        VALUES (?, ?)
-      `);
-      for (const assetId of processedIds) insertProcessed.run(assetId, sessionId);
-      db.prepare(`
-        UPDATE sessions
-        SET committed = 1, committed_at = datetime('now')
-        WHERE id = ?
-      `).run(sessionId);
-      invalidateLibraryCache(db);
-    });
-    markCommitted();
-    results.committed = true;
-    results.assetsProcessed = processedIds.length;
-    results.editedAssetsProcessed = uploadedEditIds.length;
-  } else {
-    results.committed = false;
-  }
+    // 3. Create stacks
+    if (options.createStacks) {
+      for (const item of preview.items.stacks) {
+        if (commitActionApplied(db, sessionId, 'stack', item.key, item.payload)) continue;
+        try {
+          await createStack(item.payload.assetIds);
+          recordCommitAction(db, sessionId, 'stack', item.key, item.payload, 'succeeded');
+          results.stacksCreated++;
+          step('stacks').succeeded++;
+        } catch (err) {
+          const message = clientErrorMessage(err, 'Stack creation failed');
+          recordCommitAction(db, sessionId, 'stack', item.key, item.payload, 'failed', message);
+          addError('stacks', `Stack creation failed: ${message}`);
+        }
+      }
+    }
 
-  res.json(results);
+    // 4. Upload edited versions, preserving the original as stack primary.
+    if (options.uploadEdits) {
+      for (const edit of context.edits) {
+        try {
+          const uploadResult = await withEditLock(sessionId, edit.asset_id, async () => (
+            uploadAndStackEdit(
+              db,
+              sessionId,
+              edit,
+              assetMetadata.get(edit.asset_id) || {}
+            )
+          ));
+          if (uploadResult.alreadyApplied) {
+            results.editsAlreadyUploaded++;
+          } else {
+            results.editsUploaded++;
+            step('edits').succeeded++;
+          }
+        } catch (err) {
+          const message = clientErrorMessage(err, 'Edited upload failed');
+          db.prepare(`
+            UPDATE edits
+            SET render_error = ?,
+                updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+            WHERE id = ?
+          `).run(message, edit.id);
+          addError('edits', `Edited upload failed for ${edit.asset_id}: ${message}`);
+        }
+      }
+    }
+
+    if (results.errors.length === 0) {
+      const assetIds = sessionAssetIds(db, sessionId);
+      const uploadedEditIds = db.prepare(`
+        SELECT immich_asset_id
+        FROM edits
+        WHERE session_id = ?
+          AND render_status = 'uploaded'
+          AND immich_asset_id IS NOT NULL
+      `).all(sessionId).map(row => row.immich_asset_id);
+      const processedIds = [...new Set([...assetIds, ...uploadedEditIds])];
+      const markCommitted = db.transaction(() => {
+        const insertProcessed = db.prepare(`
+          INSERT OR IGNORE INTO processed_assets (asset_id, session_id)
+          VALUES (?, ?)
+        `);
+        for (const assetId of processedIds) insertProcessed.run(assetId, sessionId);
+        db.prepare(`
+          UPDATE sessions
+          SET committed = 1, committed_at = datetime('now')
+          WHERE id = ?
+        `).run(sessionId);
+        invalidateLibraryCache(db);
+      });
+      markCommitted();
+      results.committed = true;
+      results.assetsProcessed = processedIds.length;
+      results.editedAssetsProcessed = uploadedEditIds.length;
+    } else {
+      results.committed = false;
+    }
+
+    db.prepare(`
+      UPDATE commit_runs
+      SET status = ?, result = ?, completed_at = datetime('now')
+      WHERE id = ?
+    `).run(results.committed ? 'succeeded' : 'failed', JSON.stringify(results), runId);
+    return res.json(results);
+  } catch (err) {
+    const message = clientErrorMessage(err, 'Commit failed');
+    const failedResult = { ...results, committed: false, errors: [...results.errors, message] };
+    db.prepare(`
+      UPDATE commit_runs
+      SET status = 'failed', result = ?, completed_at = datetime('now')
+      WHERE id = ?
+    `).run(JSON.stringify(failedResult), runId);
+    return res.status(500).json({ error: message, result: failedResult });
+  } finally {
+    commitLocks.delete(String(sessionId));
+  }
 });
 
 // GET /api/proxy/thumbnail/:assetId

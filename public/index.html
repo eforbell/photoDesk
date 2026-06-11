@@ -330,9 +330,21 @@
         </div>
       </div>
 
+      <div id="commit-confirmation" class="commit-confirmation hidden" role="region" aria-labelledby="commit-confirm-title">
+        <div class="commit-confirm-eyebrow">Review before pushing</div>
+        <h3 id="commit-confirm-title">Confirm Immich changes</h3>
+        <div id="commit-confirm-steps" class="commit-confirm-steps"></div>
+        <div id="commit-confirm-warning" class="commit-confirm-warning hidden"></div>
+        <p id="commit-confirm-note" class="commit-confirm-note"></p>
+        <div class="commit-confirm-actions">
+          <button class="btn btn-ghost" id="commit-confirm-cancel">Cancel</button>
+          <button class="btn btn-primary" id="commit-confirm-apply">Confirm commit</button>
+        </div>
+      </div>
+
       <div id="commit-log"></div>
 
-      <div class="summary-actions">
+      <div class="summary-actions" id="summary-actions">
         <button class="btn btn-ghost" id="back-to-review">Back to review</button>
         <button class="btn btn-primary" id="commit-btn">
           Commit to Immich

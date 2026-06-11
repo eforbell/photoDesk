@@ -30,7 +30,7 @@ test('fresh database applies the current schema baseline', () => {
   const db = new Database(temp.path);
   try {
     const result = migrateDatabase(db, { logger: silentLogger() });
-    assert.equal(result.applied, 3);
+    assert.equal(result.applied, 4);
     assert.equal(result.adopted, false);
 
     const tables = new Set(
@@ -39,12 +39,15 @@ test('fresh database applies the current schema baseline', () => {
     for (const table of Object.keys(BASELINE_SHAPE)) assert.ok(tables.has(table));
     assert.ok(tables.has('schema_migrations'));
     assert.ok(tables.has('edits'));
+    assert.ok(tables.has('commit_actions'));
+    assert.ok(tables.has('commit_runs'));
     assert.deepEqual(
       db.prepare('SELECT filename FROM schema_migrations ORDER BY filename').all(),
       [
         { filename: BASELINE_MIGRATION },
         { filename: '002-baseline-indexes.sql' },
         { filename: '003-editor-state.sql' },
+        { filename: '004-commit-history.sql' },
       ]
     );
   } finally {
@@ -86,7 +89,7 @@ test('existing matching database adopts the baseline without losing data', () =>
     db.prepare(`INSERT INTO sessions (name) VALUES (?)`).run('Keep me');
 
     const result = migrateDatabase(db, { logger: silentLogger() });
-    assert.equal(result.applied, 2);
+    assert.equal(result.applied, 3);
     assert.equal(result.adopted, true);
     assert.equal(db.prepare('SELECT name FROM sessions').get().name, 'Keep me');
     assert.deepEqual(
@@ -95,6 +98,7 @@ test('existing matching database adopts the baseline without losing data', () =>
         { filename: BASELINE_MIGRATION },
         { filename: '002-baseline-indexes.sql' },
         { filename: '003-editor-state.sql' },
+        { filename: '004-commit-history.sql' },
       ]
     );
     const indexes = new Set(

@@ -81,6 +81,32 @@ CREATE TABLE edits (
   UNIQUE(session_id, asset_id)
 );
 
+CREATE TABLE commit_actions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  session_id INTEGER NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+  action_type TEXT NOT NULL
+    CHECK(action_type IN ('trash', 'rating', 'stack')),
+  action_key TEXT NOT NULL,
+  payload TEXT NOT NULL,
+  status TEXT NOT NULL
+    CHECK(status IN ('succeeded', 'failed')),
+  attempts INTEGER NOT NULL DEFAULT 1,
+  last_error TEXT,
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE(session_id, action_type, action_key)
+);
+
+CREATE TABLE commit_runs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  session_id INTEGER NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+  dry_run INTEGER NOT NULL DEFAULT 0 CHECK(dry_run IN (0, 1)),
+  status TEXT NOT NULL CHECK(status IN ('running', 'succeeded', 'failed')),
+  options TEXT NOT NULL,
+  result TEXT,
+  started_at TEXT NOT NULL DEFAULT (datetime('now')),
+  completed_at TEXT
+);
+
 CREATE INDEX idx_scenes_session ON scenes(session_id, scene_index);
 CREATE INDEX idx_decisions_session ON decisions(session_id);
 CREATE INDEX idx_ratings_session ON ratings(session_id);
@@ -88,3 +114,5 @@ CREATE INDEX idx_stack_groups_session ON stack_groups(session_id);
 CREATE INDEX idx_processed_assets_session ON processed_assets(session_id);
 CREATE INDEX idx_edits_session ON edits(session_id);
 CREATE INDEX idx_edits_status ON edits(render_status);
+CREATE INDEX idx_commit_actions_session ON commit_actions(session_id, status);
+CREATE INDEX idx_commit_runs_session ON commit_runs(session_id, started_at);
