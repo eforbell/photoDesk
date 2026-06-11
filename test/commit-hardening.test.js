@@ -13,6 +13,7 @@ const nativeFetch = global.fetch;
 const calls = [];
 let ratingFailuresRemaining = 0;
 const trashFailures = new Set();
+const assetInfoOwners = new Map();
 
 global.fetch = async (url, options = {}) => {
   const href = String(url);
@@ -22,6 +23,13 @@ global.fetch = async (url, options = {}) => {
   calls.push({ href, method, body: options.body });
   if (href.endsWith('/api/users/me')) {
     return Response.json({ id: 'user-1', name: 'PhotoDesk Owner' });
+  }
+  const assetInfoMatch = href.match(/\/api\/assets\/([^/]+)$/);
+  if (assetInfoMatch && method === 'GET' && assetInfoOwners.has(assetInfoMatch[1])) {
+    return Response.json({
+      id: assetInfoMatch[1],
+      ownerId: assetInfoOwners.get(assetInfoMatch[1]),
+    });
   }
   if (href.endsWith('/api/assets') && method === 'DELETE') {
     const payload = JSON.parse(options.body);
@@ -114,6 +122,7 @@ test.beforeEach(() => {
   calls.length = 0;
   ratingFailuresRemaining = 0;
   trashFailures.clear();
+  assetInfoOwners.clear();
 });
 
 test('dry-run previews actions without mutating Immich or writing commit history', async () => {
@@ -304,6 +313,39 @@ test('mixed-owner sessions are rejected before any Immich mutation', async () =>
   assert.deepEqual(
     calls.map(call => `${call.method} ${call.href}`),
     ['GET http://immich.test/api/users/me']
+  );
+});
+
+test('legacy sessions resolve missing owner metadata through Immich', async () => {
+  const sessionId = createSession();
+  const db = getDb();
+  const scene = db.prepare(
+    'SELECT id, asset_ids FROM scenes WHERE session_id = ?'
+  ).get(sessionId);
+  const assets = JSON.parse(scene.asset_ids);
+  delete assets[1].ownerId;
+  db.prepare('UPDATE scenes SET asset_ids = ? WHERE id = ?')
+    .run(JSON.stringify(assets), scene.id);
+  assetInfoOwners.set('asset-2', 'partner-user');
+  calls.length = 0;
+
+  const result = await postCommit(sessionId, {
+    trashRejects: true,
+    writeRatings: true,
+    createStacks: true,
+    uploadEdits: false,
+  }, true);
+
+  assert.equal(result.response.status, 409);
+  assert.equal(result.body.code, 'session_contains_unwritable_assets');
+  assert.equal(result.body.partnerAssetCount, 1);
+  assert.equal(result.body.unavailableAssetCount, 0);
+  assert.deepEqual(
+    calls.map(call => `${call.method} ${call.href}`),
+    [
+      'GET http://immich.test/api/users/me',
+      'GET http://immich.test/api/assets/asset-2',
+    ]
   );
 });
 

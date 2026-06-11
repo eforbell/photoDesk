@@ -8,6 +8,7 @@ const { getDb } = require('../db');
 const {
   fetchOwnedAssets,
   getCurrentUser,
+  getAssetInfo,
   assetExists,
   getThumbnailBuffer,
   getOriginalAssetBuffer,
@@ -73,21 +74,23 @@ function sessionAssetMetadataMap(db, sessionId) {
 async function sessionOwnership(db, sessionId) {
   const currentUser = await getCurrentUser();
   const metadata = sessionAssetMetadataMap(db, sessionId);
-  const partnerAssetIds = [];
-  const unverifiableAssetIds = [];
-
-  for (const [assetId, asset] of metadata) {
-    let ownerId = asset.ownerId;
-    if (!ownerId) {
+  const ownership = await Promise.all(
+    [...metadata].map(async ([assetId, asset]) => {
+      if (asset.ownerId) return { assetId, ownerId: asset.ownerId };
       try {
-        ownerId = (await getAssetInfo(assetId)).ownerId;
+        const remoteAsset = await getAssetInfo(assetId);
+        return { assetId, ownerId: remoteAsset.ownerId };
       } catch {
-        unverifiableAssetIds.push(assetId);
-        continue;
+        return { assetId, unverifiable: true };
       }
-    }
-    if (ownerId !== currentUser.id) partnerAssetIds.push(assetId);
-  }
+    })
+  );
+  const partnerAssetIds = ownership
+    .filter(asset => !asset.unverifiable && asset.ownerId !== currentUser.id)
+    .map(asset => asset.assetId);
+  const unverifiableAssetIds = ownership
+    .filter(asset => asset.unverifiable || !asset.ownerId)
+    .map(asset => asset.assetId);
 
   return {
     currentUserId: currentUser.id,

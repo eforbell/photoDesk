@@ -195,3 +195,4 @@
 - Added regression coverage for owned-only discovery, cache replacement, session creation, and mutation-free rejection of mixed-owner commits.
 - Full automated suite: 44 passing tests. Browser validation confirmed the Commit screen reports the ownership boundary before confirmation or remote writes.
 - **Learning:** Immich timeline visibility is broader than write authority. PhotoDesk must treat asset ownership and endpoint capability as explicit data, not infer writability from successful discovery or preview access.
+- PR review fixed the legacy-session fallback import, added direct coverage for remote owner resolution, and parallelized transitional asset-info lookups. Immich's metadata search schema exposes no owner or partner-exclusion filter, so owned-library scoping must continue filtering response `ownerId` values client-side.
