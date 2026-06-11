@@ -174,7 +174,7 @@
 ---
 
 ## 2026-06-11 — Feature #4 Commit Hardening
-- Added a true no-write commit preview that reports pending and previously applied work without calling Immich or writing commit history.
+- Added a true no-write commit preview that reports pending and previously applied work without mutating Immich or writing commit history.
 - Added migration `004-commit-history.sql` with durable per-action outcomes and commit-run audit records.
 - Made trash, rating, and stack retries idempotent across partial failures; completed work is skipped while failed work remains retryable.
 - Preserved Feature 3's edited-upload retry boundary, including persisted remote IDs, missing-remote verification, and existing-stack association.
@@ -185,3 +185,14 @@
 - Browser-validated confirmation and failure/retry states at desktop and 390×844. Visual verdict: 96/100.
 - **Learning:** Remote actions must be checkpointed independently; treating the whole commit as one atomic operation creates duplicate stack/trash work after any later failure.
 - Follow-up review hardened trash further by sending one reject per request, documented the separate two-stage edit checkpoint, reconciled orphaned running attempts as interrupted, normalized committed response shape, and guarded confirmation against double submission.
+---
+
+## 2026-06-11 — Partner Asset Ownership Boundary
+- Confirmed that Immich metadata search includes timeline-enabled partner assets even though the connected user's API key cannot necessarily mutate them.
+- Scoped the current single-user library, suggestions, calendar, and new sessions to assets whose `ownerId` matches the connected Immich user.
+- Persisted owner identity in new scene metadata and invalidated older discovery caches that did not record their owned-library scope.
+- Added a commit preflight that blocks legacy mixed-owner or unverifiable sessions before the first Immich mutation and directs the user to start a newly scoped session.
+- Added regression coverage for owned-only discovery, cache replacement, session creation, and mutation-free rejection of mixed-owner commits.
+- Full automated suite: 44 passing tests. Browser validation confirmed the Commit screen reports the ownership boundary before confirmation or remote writes.
+- **Learning:** Immich timeline visibility is broader than write authority. PhotoDesk must treat asset ownership and endpoint capability as explicit data, not infer writability from successful discovery or preview access.
+- PR review fixed the legacy-session fallback import, added direct coverage for remote owner resolution, and parallelized transitional asset-info lookups. Immich's metadata search schema exposes no owner or partner-exclusion filter, so owned-library scoping must continue filtering response `ownerId` values client-side.

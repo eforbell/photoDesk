@@ -6,7 +6,9 @@ const editLocks = new Map();
 const commitLocks = new Set();
 const { getDb } = require('../db');
 const {
-  fetchAllAssets,
+  fetchOwnedAssets,
+  getCurrentUser,
+  getAssetInfo,
   assetExists,
   getThumbnailBuffer,
   getOriginalAssetBuffer,
@@ -67,6 +69,35 @@ function sessionAssetMetadataMap(db, sessionId) {
     }
   }
   return metadata;
+}
+
+async function sessionOwnership(db, sessionId) {
+  const currentUser = await getCurrentUser();
+  const metadata = sessionAssetMetadataMap(db, sessionId);
+  const ownership = await Promise.all(
+    [...metadata].map(async ([assetId, asset]) => {
+      if (asset.ownerId) return { assetId, ownerId: asset.ownerId };
+      try {
+        const remoteAsset = await getAssetInfo(assetId);
+        return { assetId, ownerId: remoteAsset.ownerId };
+      } catch {
+        return { assetId, unverifiable: true };
+      }
+    })
+  );
+  const partnerAssetIds = ownership
+    .filter(asset => !asset.unverifiable && asset.ownerId !== currentUser.id)
+    .map(asset => asset.assetId);
+  const unverifiableAssetIds = ownership
+    .filter(asset => asset.unverifiable || !asset.ownerId)
+    .map(asset => asset.assetId);
+
+  return {
+    currentUserId: currentUser.id,
+    partnerAssetIds,
+    unverifiableAssetIds,
+    writable: partnerAssetIds.length === 0 && unverifiableAssetIds.length === 0,
+  };
 }
 
 function removeRenderedFile(relativePath) {
@@ -321,7 +352,7 @@ router.post('/sessions', async (req, res) => {
     if (!name) return res.status(400).json({ error: 'name is required' });
 
     // Fetch all assets from Immich
-    let assets = await fetchAllAssets({
+    let assets = await fetchOwnedAssets({
       dateFrom: localDateBoundary(dateFrom),
       dateTo: localDateBoundary(dateTo, true),
     });
@@ -371,6 +402,7 @@ router.post('/sessions', async (req, res) => {
           height: a.exifInfo?.exifImageHeight || a.originalHeight || 0,
           originalFileName: a.originalFileName || '',
           fileCreatedAt: a.fileCreatedAt || '',
+          ownerId: a.ownerId,
         }));
         insertScene.run(sessionId, i, JSON.stringify(assetData));
       }
@@ -867,6 +899,30 @@ router.post('/sessions/:id/commit', async (req, res) => {
       alreadyAppliedActions: 0,
       warnings: [],
       items: { rejects: [], ratings: [], stacks: [], edits: [] },
+    });
+  }
+
+  let ownership;
+  try {
+    ownership = await sessionOwnership(db, sessionId);
+  } catch (err) {
+    return res.status(502).json({
+      error: clientErrorMessage(err, 'Unable to verify session asset ownership'),
+      code: 'ownership_check_failed',
+    });
+  }
+  if (!ownership.writable) {
+    const partnerCount = ownership.partnerAssetIds.length;
+    const unknownCount = ownership.unverifiableAssetIds.length;
+    const details = [
+      partnerCount ? `${partnerCount} partner-owned` : null,
+      unknownCount ? `${unknownCount} unavailable` : null,
+    ].filter(Boolean).join(' and ');
+    return res.status(409).json({
+      error: `This session contains ${details} ${partnerCount + unknownCount === 1 ? 'asset' : 'assets'} that PhotoDesk cannot safely commit. Start a new session; discovery now includes only photos owned by the connected Immich account.`,
+      code: 'session_contains_unwritable_assets',
+      partnerAssetCount: partnerCount,
+      unavailableAssetCount: unknownCount,
     });
   }
 

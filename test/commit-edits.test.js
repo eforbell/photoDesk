@@ -21,6 +21,9 @@ global.fetch = async (url, options = {}) => {
   if (!href.startsWith('http://immich.test/')) return nativeFetch(url, options);
 
   immichCalls.push({ href, method: options.method || 'GET', body: options.body });
+  if (href.endsWith('/api/users/me')) {
+    return Response.json({ id: 'user-1', name: 'PhotoDesk Owner' });
+  }
   if (href.endsWith('/api/assets') && options.method === 'POST') {
     assert.ok(options.body instanceof FormData);
     assert.equal(options.body.get('deviceId'), 'photodesk');
@@ -80,6 +83,7 @@ function createReadySession(name) {
     id: 'asset-1',
     originalFileName: 'IMG_0001.HEIC',
     fileCreatedAt: '2026-06-01T14:30:00.000Z',
+    ownerId: 'user-1',
     width: 4000,
     height: 3000,
   }]));

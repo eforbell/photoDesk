@@ -13,6 +13,7 @@ const nativeFetch = global.fetch;
 const calls = [];
 let ratingFailuresRemaining = 0;
 const trashFailures = new Set();
+const assetInfoOwners = new Map();
 
 global.fetch = async (url, options = {}) => {
   const href = String(url);
@@ -20,6 +21,16 @@ global.fetch = async (url, options = {}) => {
 
   const method = options.method || 'GET';
   calls.push({ href, method, body: options.body });
+  if (href.endsWith('/api/users/me')) {
+    return Response.json({ id: 'user-1', name: 'PhotoDesk Owner' });
+  }
+  const assetInfoMatch = href.match(/\/api\/assets\/([^/]+)$/);
+  if (assetInfoMatch && method === 'GET' && assetInfoOwners.has(assetInfoMatch[1])) {
+    return Response.json({
+      id: assetInfoMatch[1],
+      ownerId: assetInfoOwners.get(assetInfoMatch[1]),
+    });
+  }
   if (href.endsWith('/api/assets') && method === 'DELETE') {
     const payload = JSON.parse(options.body);
     assert.equal(payload.force, false);
@@ -61,9 +72,9 @@ function createSession() {
     INSERT INTO scenes (session_id, scene_index, asset_ids)
     VALUES (?, 0, ?)
   `).run(sessionId, JSON.stringify([
-    { id: 'asset-1' },
-    { id: 'asset-2' },
-    { id: 'asset-3' },
+    { id: 'asset-1', ownerId: 'user-1' },
+    { id: 'asset-2', ownerId: 'user-1' },
+    { id: 'asset-3', ownerId: 'user-1' },
   ]));
   db.prepare(`
     INSERT INTO decisions (session_id, asset_id, decision)
@@ -111,9 +122,10 @@ test.beforeEach(() => {
   calls.length = 0;
   ratingFailuresRemaining = 0;
   trashFailures.clear();
+  assetInfoOwners.clear();
 });
 
-test('dry-run previews actions without calling Immich or writing commit history', async () => {
+test('dry-run previews actions without mutating Immich or writing commit history', async () => {
   const sessionId = createSession();
   const options = {
     trashRejects: true,
@@ -129,7 +141,10 @@ test('dry-run previews actions without calling Immich or writing commit history'
   assert.equal(body.pendingActions, 3);
   assert.equal(body.alreadyAppliedActions, 0);
   assert.equal(body.warnings.length, 1);
-  assert.equal(calls.length, 0);
+  assert.deepEqual(
+    calls.map(call => ({ method: call.method, path: new URL(call.href).pathname })),
+    [{ method: 'GET', path: '/api/users/me' }]
+  );
   assert.equal(
     getDb().prepare('SELECT COUNT(*) AS count FROM commit_runs').get().count,
     0
@@ -162,7 +177,10 @@ test('partial failure is durable and retry sends only unfinished actions', async
   const preview = await postCommit(sessionId, options, true);
   assert.equal(preview.body.pendingActions, 1);
   assert.equal(preview.body.alreadyAppliedActions, 2);
-  assert.equal(calls.length, 0);
+  assert.deepEqual(
+    calls.map(call => ({ method: call.method, path: new URL(call.href).pathname })),
+    [{ method: 'GET', path: '/api/users/me' }]
+  );
 
   const second = await postCommit(sessionId, options);
   assert.equal(second.body.committed, true);
@@ -267,6 +285,68 @@ test('already committed responses retain the normal preview envelope', async () 
   assert.equal(result.body.committed, true);
   assert.deepEqual(result.body.warnings, []);
   assert.deepEqual(result.body.items, { rejects: [], ratings: [], stacks: [], edits: [] });
+});
+
+test('mixed-owner sessions are rejected before any Immich mutation', async () => {
+  const sessionId = createSession();
+  const db = getDb();
+  const scene = db.prepare(
+    'SELECT id, asset_ids FROM scenes WHERE session_id = ?'
+  ).get(sessionId);
+  const assets = JSON.parse(scene.asset_ids);
+  assets[1].ownerId = 'partner-user';
+  db.prepare('UPDATE scenes SET asset_ids = ? WHERE id = ?')
+    .run(JSON.stringify(assets), scene.id);
+  calls.length = 0;
+
+  const result = await postCommit(sessionId, {
+    trashRejects: true,
+    writeRatings: true,
+    createStacks: true,
+    uploadEdits: false,
+  }, true);
+
+  assert.equal(result.response.status, 409);
+  assert.equal(result.body.code, 'session_contains_unwritable_assets');
+  assert.equal(result.body.partnerAssetCount, 1);
+  assert.match(result.body.error, /Start a new session/);
+  assert.deepEqual(
+    calls.map(call => `${call.method} ${call.href}`),
+    ['GET http://immich.test/api/users/me']
+  );
+});
+
+test('legacy sessions resolve missing owner metadata through Immich', async () => {
+  const sessionId = createSession();
+  const db = getDb();
+  const scene = db.prepare(
+    'SELECT id, asset_ids FROM scenes WHERE session_id = ?'
+  ).get(sessionId);
+  const assets = JSON.parse(scene.asset_ids);
+  delete assets[1].ownerId;
+  db.prepare('UPDATE scenes SET asset_ids = ? WHERE id = ?')
+    .run(JSON.stringify(assets), scene.id);
+  assetInfoOwners.set('asset-2', 'partner-user');
+  calls.length = 0;
+
+  const result = await postCommit(sessionId, {
+    trashRejects: true,
+    writeRatings: true,
+    createStacks: true,
+    uploadEdits: false,
+  }, true);
+
+  assert.equal(result.response.status, 409);
+  assert.equal(result.body.code, 'session_contains_unwritable_assets');
+  assert.equal(result.body.partnerAssetCount, 1);
+  assert.equal(result.body.unavailableAssetCount, 0);
+  assert.deepEqual(
+    calls.map(call => `${call.method} ${call.href}`),
+    [
+      'GET http://immich.test/api/users/me',
+      'GET http://immich.test/api/assets/asset-2',
+    ]
+  );
 });
 
 test('commit option types are validated before any work begins', async () => {

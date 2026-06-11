@@ -11,6 +11,17 @@ function authHeaders() {
   return { 'x-api-key': config.immichApiKey };
 }
 
+async function getCurrentUser() {
+  const res = await fetch(`${config.immichUrl}/api/users/me`, {
+    headers: authHeaders(),
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`Immich current user lookup failed: ${res.status} ${text}`);
+  }
+  return res.json();
+}
+
 async function searchAssets({ page = 1, size = 250, dateFrom, dateTo } = {}) {
   const body = {
     page,
@@ -53,8 +64,16 @@ async function fetchAllAssets({ dateFrom, dateTo } = {}) {
   return allAssets;
 }
 
+async function fetchOwnedAssets(options = {}) {
+  const [user, assets] = await Promise.all([
+    getCurrentUser(),
+    fetchAllAssets(options),
+  ]);
+  return assets.filter(asset => asset.ownerId === user.id);
+}
+
 async function checkConnection() {
-  await searchAssets({ page: 1, size: 1 });
+  await getCurrentUser();
   return true;
 }
 
@@ -230,6 +249,8 @@ async function updateAssetRating(assetId, rating) {
 
 module.exports = {
   fetchAllAssets,
+  fetchOwnedAssets,
+  getCurrentUser,
   assetExists,
   getAssetInfo,
   getThumbnailBuffer,

@@ -5,6 +5,12 @@
   "scheduled": false,
   "priority": "P1",
   "summary": "Permit each family member to use PhotoDesk through an authenticated household profile backed by that person's own user-scoped Immich API key. Review sessions, reviewed state, edits, and caches remain private to the profile even when Immich partner sharing makes household photos visible in a combined timeline.",
+  "fieldLearning": {
+    "date": "2026-06-11",
+    "finding": "Immich metadata search includes assets from timeline-enabled partners. Visibility does not imply mutation access: the connected user's key could preview partner assets but could not trash, rate, or stack them.",
+    "mvpMitigation": "Single-user PhotoDesk discovery now filters search results to AssetResponseDto.ownerId matching GET /api/users/me. New sessions persist ownerId, old unscoped discovery caches are invalidated, and legacy mixed-owner sessions are rejected before commit performs any Immich mutation.",
+    "futureImplication": "Partner timeline support must remain an explicit, ownership-labeled, capability-aware scope. It cannot reuse the owned-library commit model."
+  },
   "productIntent": [
     "The household can share photos through Immich without forcing everyone to operate as the Immich administrator.",
     "Each person gets an independent PhotoDesk workspace and can review the same shared photo independently.",
