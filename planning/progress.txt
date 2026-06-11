@@ -171,3 +171,17 @@
 - Added an unscheduled household profiles feature concept for independent family review sessions backed by per-user Immich API keys.
 - Captured the required profile/session/credential schema, migration of the current single-user installation, per-profile reviewed-state and cache partitioning, partner-timeline ownership rules, threat model, staged delivery slices, and acceptance criteria.
 - Recommended owned-library multi-user support before capability-aware partner-asset writes; explicitly rejected a shared administrator key with a cosmetic user picker.
+---
+
+## 2026-06-11 — Feature #4 Commit Hardening
+- Added a true no-write commit preview that reports pending and previously applied work without calling Immich or writing commit history.
+- Added migration `004-commit-history.sql` with durable per-action outcomes and commit-run audit records.
+- Made trash, rating, and stack retries idempotent across partial failures; completed work is skipped while failed work remains retryable.
+- Preserved Feature 3's edited-upload retry boundary, including persisted remote IDs, missing-remote verification, and existing-stack association.
+- Added structured per-step API results, option validation, and a per-session concurrent commit guard.
+- Added a confirmation state that clearly warns about recoverable trash actions and distinguishes pending work from already-applied work.
+- Added browser-visible per-action success, skipped, and failure reporting with a focused Retry path.
+- Added regression coverage for no-write preview, partial-failure recovery, and invalid options. Full suite: 38 passing tests.
+- Browser-validated confirmation and failure/retry states at desktop and 390×844. Visual verdict: 96/100.
+- **Learning:** Remote actions must be checkpointed independently; treating the whole commit as one atomic operation creates duplicate stack/trash work after any later failure.
+- Follow-up review hardened trash further by sending one reject per request, documented the separate two-stage edit checkpoint, reconciled orphaned running attempts as interrupted, normalized committed response shape, and guarded confirmation against double submission.

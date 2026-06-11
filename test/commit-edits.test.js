@@ -95,8 +95,8 @@ function createReadySession(name) {
   return sessionId;
 }
 
-async function commit(sessionId) {
-  const response = await nativeFetch(`${baseUrl}/api/sessions/${sessionId}/commit`, {
+async function commit(sessionId, { dryRun = false } = {}) {
+  const response = await nativeFetch(`${baseUrl}/api/sessions/${sessionId}/commit${dryRun ? '?dryRun=true' : ''}`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({
@@ -206,9 +206,15 @@ test('re-uploads when a persisted edited asset no longer exists in Immich', asyn
     WHERE session_id = ?
   `).run(sessionId);
 
+  const preview = await commit(sessionId, { dryRun: true });
+  assert.equal(preview.steps.find(step => step.id === 'edits').alreadyApplied, 1);
+
   const result = await commit(sessionId);
   assert.equal(result.committed, true);
   assert.equal(result.editsUploaded, 1);
+  assert.equal(result.editsAlreadyUploaded, 0);
+  assert.equal(result.steps.find(step => step.id === 'edits').alreadyApplied, 0);
+  assert.equal(result.steps.find(step => step.id === 'edits').succeeded, 1);
   assert.equal(
     immichCalls.filter(call => call.href.endsWith('/api/assets') && call.method === 'POST').length,
     1

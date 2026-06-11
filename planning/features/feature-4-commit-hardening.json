@@ -26,6 +26,40 @@
     "Immich rating writes: does PUT /api/assets/:id with same rating value cause any side effects (updated_at change)?",
     "Immich stack creation: what happens if you POST /api/stacks with assets that are already in a stack? (Merge behavior per the API docs, but need to verify)"
   ],
-  "status": "planned",
-  "detailLevel": "outline — will be expanded after Features #1-3 are shipped and real-world commit patterns are observed"
+  "implementation": {
+    "schema": [
+      "db/migrations/004-commit-history.sql adds commit_actions for durable per-action outcomes",
+      "commit_runs stores each real commit attempt, selected options, structured result, timestamps, and final status",
+      "db/schema.sql remains the complete current schema snapshot"
+    ],
+    "api": [
+      "POST /api/sessions/:id/commit?dryRun=true returns pending and already-applied counts without calling Immich or writing local state",
+      "Real commits return structured per-step succeeded, failed, alreadyApplied, and error details while preserving the existing aggregate counters",
+      "Trash, rating, and stack successes are recorded independently so retries send only unfinished work",
+      "Trash rejects are sent and checkpointed one asset at a time, avoiding reliance on bulk-delete response atomicity",
+      "Edited upload retry safety intentionally uses edits.render_status and edits.immich_asset_id rather than commit_actions because upload and stack association form a two-stage retry boundary",
+      "Orphaned running commit attempts from a prior process are marked interrupted before a new attempt begins",
+      "Concurrent commit requests for the same session are rejected while one is active",
+      "Commit option types are validated before preview or execution"
+    ],
+    "frontend": [
+      "Commit first performs a no-write preview and displays a confirmation state inside the design-handoff summary card",
+      "Recoverable trash behavior is called out before confirmation",
+      "The confirmation distinguishes pending operations from actions already applied during an earlier partial attempt",
+      "The confirmation button is guarded against rapid duplicate submissions",
+      "Uploaded edits are described as locally checkpointed and are rechecked against Immich at execution time",
+      "Results are presented per action, including skipped completed work and actionable failures",
+      "Incomplete commits restore the option controls and expose a Retry action"
+    ],
+    "verification": [
+      "Regression coverage proves dry-run performs no Immich calls and writes no commit history",
+      "Regression coverage forces a partial rating failure after successful trash and stack operations, then proves retry sends only the rating",
+      "Existing edited-upload retry, existing-stack, and missing-remote-edit tests continue to pass",
+      "Full automated suite passes with 41 tests",
+      "Browser validation completed at desktop and 390x844; confirmation and failure/retry states remain usable without horizontal overflow",
+      "Visual verdict: 96/100"
+    ]
+  },
+  "status": "ready-for-review",
+  "detailLevel": "implemented and regression-tested"
 }

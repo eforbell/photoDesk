@@ -2060,6 +2060,69 @@ input.suggestion-name:focus {
   margin-top: 2px;
 }
 
+.commit-confirmation {
+  background: var(--bg-deep);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 18px;
+  margin-bottom: 24px;
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.28);
+}
+.commit-confirm-eyebrow {
+  font-family: var(--mono);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--accent-text);
+  margin-bottom: 5px;
+}
+.commit-confirmation h3 {
+  font-size: 17px;
+  margin: 0 0 14px;
+}
+.commit-confirm-steps {
+  border-top: 1px solid var(--border-soft);
+  border-bottom: 1px solid var(--border-soft);
+  padding: 7px 0;
+}
+.commit-confirm-step {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 7px 0;
+  font-size: 13px;
+  color: var(--text-dim);
+}
+.commit-confirm-step strong {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--text);
+  font-weight: 500;
+  text-align: right;
+}
+.commit-confirm-warning {
+  margin-top: 13px;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in oklch, var(--reject) 40%, var(--border));
+  border-radius: 8px;
+  color: color-mix(in oklch, var(--reject) 75%, white);
+  background: color-mix(in oklch, var(--reject) 8%, transparent);
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+.commit-confirm-note {
+  color: var(--text-ghost);
+  font-size: 12px;
+  line-height: 1.45;
+  margin: 13px 0 0;
+}
+.commit-confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 9px;
+  margin-top: 16px;
+}
+
 /* Progress log */
 .commit-log {
   background: var(--bg-deep);
@@ -2079,6 +2142,8 @@ input.suggestion-name:focus {
   padding: 3px 0;
 }
 .commit-log-line svg { width: 14px; height: 14px; flex: none; }
+.commit-log-line.skipped { color: var(--text-ghost); }
+.commit-log-line.failed { color: var(--reject); }
 .commit-log-done {
   margin-top: 8px;
   font-size: 13px;

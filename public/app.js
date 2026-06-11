@@ -1945,6 +1945,8 @@ function showSummary() {
 
   // Reset commit state
   $('commit-log').innerHTML = '';
+  $('commit-confirmation').classList.add('hidden');
+  $('summary-actions').classList.remove('hidden');
   if (state.currentSession._committed) {
     $('commit-options').style.display = 'none';
     $('commit-btn').disabled = false;
@@ -1962,18 +1964,92 @@ function showSummary() {
 }
 
 $('back-to-review').addEventListener('click', () => {
+  $('commit-confirmation').classList.add('hidden');
   showScreen('review');
 });
 
-$('commit-btn').addEventListener('click', async () => {
-  if (state.currentSession._committed) return;
+function selectedCommitOptions() {
+  return {
+    trashRejects: $('opt-trash-rejects').checked,
+    writeRatings: $('opt-write-ratings').checked,
+    createStacks: $('opt-create-stacks').checked,
+    uploadEdits: $('opt-upload-edits').checked,
+  };
+}
+
+let pendingCommitOptions = null;
+let commitRequestInFlight = false;
+
+function setCommitOptionControlsDisabled(disabled) {
+  $('opt-trash-rejects').disabled = disabled;
+  $('opt-write-ratings').disabled = disabled;
+  $('opt-create-stacks').disabled = disabled;
+  const hasEdits = Object.values(state.editMap).some(edit => (
+    ['ready', 'uploaded'].includes(edit.render_status)
+  ));
+  $('opt-upload-edits').disabled = disabled || !hasEdits;
+}
+
+function closeCommitConfirmation() {
+  if (commitRequestInFlight) return;
+  pendingCommitOptions = null;
+  $('commit-confirmation').classList.add('hidden');
+  $('summary-actions').classList.remove('hidden');
+  setCommitOptionControlsDisabled(false);
+  $('commit-btn').disabled = false;
+  $('commit-btn').innerHTML = `Commit to Immich ${icon('arrowR', 15)}`;
+}
+
+function showCommitConfirmation(preview, options) {
+  pendingCommitOptions = { ...options };
+  setCommitOptionControlsDisabled(true);
+  const selectedSteps = preview.steps.filter(step => step.selected);
+  $('commit-confirm-steps').innerHTML = selectedSteps.length
+    ? selectedSteps.map(step => {
+      const pending = `${step.pending} pending`;
+      const applied = step.alreadyApplied > 0
+        ? ` · ${step.alreadyApplied} already applied`
+        : '';
+      return `
+        <div class="commit-confirm-step">
+          <span>${escHtml(step.label)}</span>
+          <strong>${escHtml(pending + applied)}</strong>
+        </div>
+      `;
+    }).join('')
+    : `
+      <div class="commit-confirm-step">
+        <span>Immich changes</span>
+        <strong>None selected</strong>
+      </div>
+    `;
+  const warning = $('commit-confirm-warning');
+  warning.textContent = preview.warnings.join(' ');
+  warning.classList.toggle('hidden', preview.warnings.length === 0);
+  $('commit-confirm-note').textContent = preview.pendingActions > 0
+    ? 'PhotoDesk records each successful action. If a later action fails, Retry sends only unfinished work.'
+    : 'No new Immich operations are pending. Confirming will mark this review session processed.';
+  if (preview.steps.some(step => step.id === 'edits' && step.selected && step.recheckedAtCommit)) {
+    $('commit-confirm-note').textContent += ' Uploaded edits are rechecked against Immich when the commit starts.';
+  }
+  $('commit-confirm-apply').textContent = preview.pendingActions > 0
+    ? `Confirm ${preview.pendingActions} ${preview.pendingActions === 1 ? 'action' : 'actions'}`
+    : 'Mark reviewed';
+  $('commit-confirmation').classList.remove('hidden');
+  $('summary-actions').classList.add('hidden');
+  $('commit-confirm-apply').focus();
+}
+
+async function executeCommit(options) {
+  if (commitRequestInFlight) return;
+  commitRequestInFlight = true;
+  $('commit-confirm-apply').disabled = true;
+  $('commit-confirm-cancel').disabled = true;
+  pendingCommitOptions = null;
+  $('commit-confirmation').classList.add('hidden');
+  $('summary-actions').classList.remove('hidden');
   $('commit-btn').disabled = true;
   $('commit-btn').innerHTML = `<span class="spinner" style="width:15px;height:15px;border-width:2px;display:inline-block;vertical-align:middle;margin-right:6px;"></span> Committing\u2026`;
-
-  const trashRejects = $('opt-trash-rejects').checked;
-  const writeRatings = $('opt-write-ratings').checked;
-  const createStacks = $('opt-create-stacks').checked;
-  const uploadEdits = $('opt-upload-edits').checked;
 
   const logEl = $('commit-log');
   logEl.innerHTML = '<div class="commit-log" id="commit-log-inner"></div>';
@@ -1988,28 +2064,25 @@ $('commit-btn').addEventListener('click', async () => {
 
   try {
     const result = await api('POST', `/api/sessions/${state.currentSession.id}/commit`, {
-      trashRejects,
-      writeRatings,
-      createStacks,
-      uploadEdits,
+      ...options,
     });
 
-    if (trashRejects && result.assetsTrashed > 0) {
-      addLogLine(`Trashed ${result.assetsTrashed} rejects \u2192 Immich trash`);
-    }
-    if (writeRatings && result.ratingsWritten > 0) {
-      addLogLine(`Wrote ${result.ratingsWritten} star ratings to metadata`);
-    }
-    if (createStacks && result.stacksCreated > 0) {
-      addLogLine(`Created ${result.stacksCreated} stacks`);
-    }
-    if (uploadEdits && result.editsUploaded > 0) {
-      addLogLine(`Uploaded ${result.editsUploaded} edited ${result.editsUploaded === 1 ? 'version' : 'versions'} and stacked with originals`);
-    }
-    if (result.errors && result.errors.length) {
-      for (const err of result.errors) {
-        logInner.innerHTML += `<div class="commit-log-line" style="color: var(--reject)">${icon('x', 14, 2.4)} ${escHtml(err)}</div>`;
+    for (const action of result.steps || []) {
+      if (!action.selected) continue;
+      if (action.succeeded > 0) {
+        addLogLine(`${action.label}: ${action.succeeded} completed`);
       }
+      if (action.alreadyApplied > 0) {
+        logInner.innerHTML += `<div class="commit-log-line skipped">${icon('check', 14, 2)} ${escHtml(action.label)}: ${action.alreadyApplied} already applied, skipped</div>`;
+      }
+      for (const error of action.errors || []) {
+        logInner.innerHTML += `<div class="commit-log-line failed">${icon('x', 14, 2.4)} ${escHtml(error)}</div>`;
+      }
+    }
+    if (result.steps?.every(action => !action.selected || (
+      action.succeeded === 0 && action.alreadyApplied === 0 && action.errors.length === 0
+    ))) {
+      addLogLine('No Immich changes selected');
     }
 
     if (result.committed) {
@@ -2022,15 +2095,44 @@ $('commit-btn').addEventListener('click', async () => {
     } else {
       logInner.innerHTML += '<div class="commit-log-line" style="color: var(--reject)">Commit incomplete. Fix the errors above and retry.</div>';
       $('commit-options').style.display = '';
+      setCommitOptionControlsDisabled(false);
       $('commit-btn').disabled = false;
       $('commit-btn').innerHTML = `Retry ${icon('arrowR', 15)}`;
     }
 
   } catch (err) {
     logInner.innerHTML += `<div class="commit-log-line" style="color: var(--reject)">${icon('x', 14, 2.4)} Commit failed: ${escHtml(err.message)}</div>`;
+    setCommitOptionControlsDisabled(false);
     $('commit-btn').disabled = false;
     $('commit-btn').innerHTML = `Retry ${icon('arrowR', 15)}`;
+  } finally {
+    commitRequestInFlight = false;
+    $('commit-confirm-apply').disabled = false;
+    $('commit-confirm-cancel').disabled = false;
   }
+}
+
+$('commit-btn').addEventListener('click', async () => {
+  if (state.currentSession._committed) return;
+  const options = selectedCommitOptions();
+  $('commit-btn').disabled = true;
+  $('commit-btn').innerHTML = `<span class="spinner" style="width:15px;height:15px;border-width:2px;display:inline-block;vertical-align:middle;margin-right:6px;"></span> Checking\u2026`;
+  try {
+    const preview = await api(
+      'POST',
+      `/api/sessions/${state.currentSession.id}/commit?dryRun=true`,
+      options
+    );
+    showCommitConfirmation(preview, options);
+  } catch (err) {
+    $('commit-log').innerHTML = `<div class="commit-log"><div class="commit-log-line failed">${icon('x', 14, 2.4)} Preview failed: ${escHtml(err.message)}</div></div>`;
+    closeCommitConfirmation();
+  }
+});
+
+$('commit-confirm-cancel').addEventListener('click', closeCommitConfirmation);
+$('commit-confirm-apply').addEventListener('click', () => {
+  executeCommit(pendingCommitOptions || selectedCommitOptions());
 });
 
 // ── Utilities ──────────────────────────────────────────────────
