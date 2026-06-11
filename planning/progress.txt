@@ -167,3 +167,7 @@
 - Discovery and untriaged-only session creation also treat every persisted `edits.immich_asset_id` as processed, which repairs edits uploaded before this change without requiring a schema migration or recommit.
 - Commit results now report the combined processed count and the number of edited assets reconciled.
 ---
+2026-06-11
+- Added an unscheduled household profiles feature concept for independent family review sessions backed by per-user Immich API keys.
+- Captured the required profile/session/credential schema, migration of the current single-user installation, per-profile reviewed-state and cache partitioning, partner-timeline ownership rules, threat model, staged delivery slices, and acceptance criteria.
+- Recommended owned-library multi-user support before capability-aware partner-asset writes; explicitly rejected a shared administrator key with a cosmetic user picker.

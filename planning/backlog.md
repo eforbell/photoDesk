@@ -1,5 +1,35 @@
 # PhotoDesk Backlog
 
+## Household access
+
+### Household profiles and scoped Immich credentials
+
+**Priority:** P1
+**Status:** Discovery / unscheduled
+**Feature concept:** [`features/feature-5-household-profiles.json`](features/feature-5-household-profiles.json)
+
+Allow each family member to sign in to PhotoDesk, connect their own
+user-scoped Immich API key, and maintain private review sessions and reviewed
+state even when the household shares photos through Immich partner timelines.
+
+The first release should be deliberately narrow: one PhotoDesk profile maps to
+one Immich user, credentials remain server-side, and write operations are
+limited to assets the active Immich user can safely modify. Shared partner
+assets may appear in discovery, but visibility must not be treated as write
+authorization.
+
+Key decisions still to make:
+
+- Reuse the household member/passphrase pattern from FamilyPulse and HomeSource,
+  or place PhotoDesk behind a shared OIDC/reverse-proxy identity provider.
+- Whether partner assets are included by default, opt-in per profile, or
+  deferred until after owned-library multi-user support ships.
+- Whether any future household-level review state should supplement—not
+  replace—the default private per-person review state.
+
+Acceptance criteria and a staged delivery plan are captured in the linked
+feature concept. This is intentionally not designated as the next feature.
+
 ## Image compatibility
 
 ### Full iPhone HEIC editing support

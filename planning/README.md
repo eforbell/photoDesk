@@ -22,6 +22,11 @@ Feature-driven development tracking for PhotoDesk, the photo review & light-edit
 | 3 | Editor (Crop + Adjustments + Presets) | ready for review |
 | 4 | Commit Hardening + Edited Asset Upload | planned |
 
+Unscheduled feature concepts:
+
+- Household Profiles + Scoped Immich Credentials — backlog discovery; not
+  designated as the next feature.
+
 ## Design Reference
 
 All design specs live in `design/design_handoff_photodesk/`. The README.md there is the authoritative design document with tokens, screen specs, interaction patterns, and Immich integration points. The prototype is high-fidelity -- tokens, colors, typography, spacing are final.
