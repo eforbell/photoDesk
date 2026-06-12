@@ -90,7 +90,7 @@
       <p>Paste your Immich API key so PhotoDesk can access your photo library. You can generate one in Immich under Account Settings &rarr; API Keys.</p>
       <form id="immich-setup-form" autocomplete="off">
         <label class="form-label" for="immich-api-key">API Key</label>
-        <input class="form-input" id="immich-api-key" name="apiKey" type="password" placeholder="Paste your Immich API key" required />
+        <input class="form-input" id="immich-api-key" name="apiKey" type="password" autocomplete="new-password" placeholder="Paste your Immich API key" required />
         <div id="immich-setup-error" class="setup-error"></div>
         <div id="immich-setup-success" class="setup-success"></div>
         <button class="setup-btn" type="submit">Verify &amp; connect</button>

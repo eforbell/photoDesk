@@ -92,8 +92,39 @@ fi
 echo "==> Installing production dependencies"
 npm ci --omit=dev
 
+DB_PATH="$(node -e "
+  require('dotenv').config();
+  const path = require('path');
+  console.log(process.env.PHOTODESK_DB_PATH
+    ? path.resolve(process.env.PHOTODESK_DB_PATH)
+    : path.join(process.cwd(), 'photodesk.db'));
+")"
+SERVICE_WAS_ACTIVE=0
+if sudo systemctl is-active --quiet "$SERVICE"; then
+  SERVICE_WAS_ACTIVE=1
+  echo "==> Stopping $SERVICE before SQLite migration"
+  sudo systemctl stop "$SERVICE"
+fi
+
+if [[ -f "$DB_PATH" ]]; then
+  BACKUP_DIR="${PHOTODESK_BACKUP_DIR:-$(dirname "$DB_PATH")/backups}"
+  mkdir -p "$BACKUP_DIR"
+  BACKUP_PATH="$BACKUP_DIR/$(basename "$DB_PATH").$(date -u +%Y%m%dT%H%M%SZ).bak"
+  echo "==> Backing up SQLite database to $BACKUP_PATH"
+  cp -p "$DB_PATH" "$BACKUP_PATH"
+fi
+
 echo "==> Running database migrations"
-npm run migrate
+if ! npm run migrate; then
+  echo "ERROR: Database migration failed."
+  if [[ -n "${BACKUP_PATH:-}" ]]; then
+    echo "Database backup retained at: $BACKUP_PATH"
+  fi
+  if [[ "$SERVICE_WAS_ACTIVE" == "1" ]]; then
+    echo "The service remains stopped to avoid running against a partial migration."
+  fi
+  exit 1
+fi
 
 echo "==> Restarting $SERVICE"
 sudo systemctl restart "$SERVICE"

@@ -1,7 +1,7 @@
 {
   "featureName": "Household Profiles and Scoped Immich Credentials",
   "workingNumber": 5,
-  "status": "ready-for-development",
+  "status": "in-review",
   "scheduled": true,
   "priority": "P1",
   "summary": "Permit each family member to use PhotoDesk through an authenticated household profile backed by that person's own user-scoped Immich API key. Review sessions, reviewed state, edits, and caches remain private to the profile even when Immich partner sharing makes household photos visible in a combined timeline.",
@@ -10,6 +10,25 @@
     "finding": "Immich metadata search includes assets from timeline-enabled partners. Visibility does not imply mutation access: the connected user's key could preview partner assets but could not trash, rate, or stack them.",
     "mvpMitigation": "Single-user PhotoDesk discovery now filters search results to AssetResponseDto.ownerId matching GET /api/users/me. New sessions persist ownerId, old unscoped discovery caches are invalidated, and legacy mixed-owner sessions are rejected before commit performs any Immich mutation.",
     "futureImplication": "Partner timeline support must remain an explicit, ownership-labeled, capability-aware scope. It cannot reuse the owned-library commit model."
+  },
+  "pr5Review": {
+    "date": "2026-06-12",
+    "fixedBeforeMerge": [
+      "Removed the server-wide Immich API key fallback from profile requests.",
+      "Added profile ownership enforcement to rendered edit downloads.",
+      "Restored uploaded edit IDs to profile-scoped processed discovery.",
+      "Corrected ISO auth-session expiry comparisons.",
+      "Seeded the untouched bootstrap profile from the existing environment key so single-user production upgrades retain their connection.",
+      "Stopped the service and backed up SQLite before deployment migrations.",
+      "Made the secrets guard active for profile query results and credential verification logs.",
+      "Prevented unauthenticated root requests from briefly bootstrapping the dashboard."
+    ],
+    "queuedProductFollowUps": [
+      "Add the parent-facing household profile management UI; the API exists, but the current header menu only exposes sign out.",
+      "Add an authenticated personal settings path for rotating an existing Immich key.",
+      "Add a self-service passphrase change flow so parent-issued temporary passphrases do not remain permanent.",
+      "Run extended two-profile browser testing through review, edit, and commit—not only login and library isolation."
+    ]
   },
   "productIntent": [
     "The household can share photos through Immich without forcing everyone to operate as the Immich administrator.",

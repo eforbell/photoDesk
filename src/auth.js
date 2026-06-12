@@ -8,16 +8,22 @@ const SCRYPT_KEYLEN = 64;
 const COOKIE_NAME = 'pd_session';
 
 function hashPassphrase(plain) {
+  if (typeof plain !== 'string') throw new TypeError('Passphrase must be a string');
   const salt = crypto.randomBytes(16).toString('hex');
   const hash = crypto.scryptSync(plain, salt, SCRYPT_KEYLEN).toString('hex');
   return `${salt}:${hash}`;
 }
 
 function verifyPassphrase(plain, stored) {
-  if (!stored || !stored.includes(':')) return false;
+  if (typeof plain !== 'string' || typeof stored !== 'string') return false;
   const [salt, hash] = stored.split(':');
+  if (!salt || !hash || !/^[a-f0-9]+$/i.test(salt) || !/^[a-f0-9]+$/i.test(hash)) {
+    return false;
+  }
+  const expected = Buffer.from(hash, 'hex');
+  if (expected.length !== SCRYPT_KEYLEN) return false;
   const test = crypto.scryptSync(plain, salt, SCRYPT_KEYLEN).toString('hex');
-  return crypto.timingSafeEqual(Buffer.from(hash, 'hex'), Buffer.from(test, 'hex'));
+  return crypto.timingSafeEqual(expected, Buffer.from(test, 'hex'));
 }
 
 function createSession(db, profileId) {
@@ -36,7 +42,7 @@ function validateSession(db, token) {
            p.immich_api_key, p.immich_url, p.immich_user_id
     FROM auth_sessions s
     JOIN profiles p ON s.profile_id = p.id
-    WHERE s.token = ? AND s.expires_at > datetime('now')
+    WHERE s.token = ? AND datetime(s.expires_at) > datetime('now')
   `).get(token);
   return row || null;
 }
@@ -51,7 +57,7 @@ function destroyProfileSessions(db, profileId) {
 }
 
 function cleanExpiredSessions(db) {
-  return db.prepare("DELETE FROM auth_sessions WHERE expires_at <= datetime('now')").run().changes;
+  return db.prepare("DELETE FROM auth_sessions WHERE datetime(expires_at) <= datetime('now')").run().changes;
 }
 
 function parseCookie(header, name) {

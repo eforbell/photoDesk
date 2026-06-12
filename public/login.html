@@ -225,6 +225,18 @@
       padding: 20px 0;
     }
 
+    .visually-hidden {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      margin: -1px;
+      overflow: hidden;
+      clip: rect(0, 0, 0, 0);
+      white-space: nowrap;
+      border: 0;
+    }
+
     /* ── Responsive ────────────────────────────────────────── */
     @media (max-width: 480px) {
       .login-card {
@@ -251,8 +263,9 @@
       <div id="profile-list" class="profile-list"></div>
 
       <form id="passphrase-form" class="passphrase-form" autocomplete="off">
+        <input class="visually-hidden" id="profile-username" name="username" type="text" autocomplete="username" tabindex="-1" />
         <label class="form-label" for="passphrase">Passphrase</label>
-        <input class="form-input" id="passphrase" name="passphrase" type="password" placeholder="Enter your passphrase" required />
+        <input class="form-input" id="passphrase" name="passphrase" type="password" autocomplete="current-password" placeholder="Enter your passphrase" required />
         <div id="error-msg" class="error-msg"></div>
         <button class="login-btn" type="submit">Sign in</button>
       </form>
@@ -264,9 +277,9 @@
       <div class="setup-subtext">Create the first parent profile to get started.</div>
       <form id="setup-form" autocomplete="off" style="display:flex;flex-direction:column;gap:12px;">
         <label class="form-label" for="setup-name">Display name</label>
-        <input class="form-input" id="setup-name" name="displayName" type="text" placeholder="e.g. Mom, Dad" required />
+        <input class="form-input" id="setup-name" name="displayName" type="text" autocomplete="username" placeholder="e.g. Mom, Dad" required />
         <label class="form-label" for="setup-pass">Passphrase</label>
-        <input class="form-input" id="setup-pass" name="passphrase" type="password" placeholder="Choose a passphrase" required />
+        <input class="form-input" id="setup-pass" name="passphrase" type="password" autocomplete="new-password" placeholder="Choose a passphrase" required />
         <div id="setup-error" class="error-msg"></div>
         <button class="login-btn" type="submit">Create profile</button>
       </form>
@@ -329,6 +342,8 @@
 
       function selectProfile(id, btn) {
         selectedProfileId = id;
+        document.getElementById('profile-username').value =
+          btn.querySelector('span:last-child').textContent;
         hideError(errorMsg);
 
         var buttons = profileList.querySelectorAll('.profile-btn');

@@ -5,7 +5,11 @@ function resolveUrl(credentials) {
 }
 
 function resolveKey(credentials) {
-  return (credentials && credentials.apiKey) || config.immichApiKey;
+  const key = credentials && credentials.apiKey;
+  if (!key) {
+    throw new Error('Immich credentials are not configured for this profile');
+  }
+  return key;
 }
 
 function headers(credentials) {

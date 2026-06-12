@@ -437,7 +437,7 @@ router.post('/sessions', async (req, res) => {
 });
 
 router.get('/health', async (req, res) => {
-  const apiKeySet = Boolean(req.profile.immich_api_key || config.immichApiKey);
+  const apiKeySet = Boolean(req.profile.immich_api_key);
   if (!apiKeySet) {
     return res.json({ immich: 'disconnected', apiKeySet: false });
   }
@@ -855,6 +855,9 @@ router.get('/edits/capabilities', (req, res) => {
 
 router.get('/edits/:sessionId/:assetId/image', (req, res) => {
   const db = getDb();
+  if (!verifySessionOwner(db, req.params.sessionId, req.profile.id)) {
+    return res.status(404).json({ error: 'Rendered edit is not ready' });
+  }
   const edit = db.prepare(`
     SELECT rendered_path, render_status
     FROM edits
@@ -1185,7 +1188,7 @@ router.get('/proxy/thumbnail/:assetId', async (req, res) => {
   try {
     const { buffer, contentType } = await getThumbnailBuffer(req.params.assetId, profileCredentials(req));
     res.set('Content-Type', contentType);
-    res.set('Cache-Control', 'public, max-age=86400');
+    res.set('Cache-Control', 'private, max-age=86400');
     res.send(buffer);
   } catch (err) {
     console.error('[thumbnail proxy]', err.message);

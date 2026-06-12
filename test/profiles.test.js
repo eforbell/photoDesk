@@ -7,14 +7,21 @@ const crypto = require('crypto');
 
 const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'photodesk-profiles-'));
 process.env.PHOTODESK_DB_PATH = path.join(tempDir, 'test.db');
+process.env.PHOTODESK_EDIT_DIR = path.join(tempDir, 'edits');
 process.env.IMMICH_URL = 'http://immich.test';
 process.env.IMMICH_API_KEY = 'test-key';
 
 const nativeFetch = global.fetch;
+const immichCalls = [];
 
 global.fetch = async (url, options = {}) => {
   const href = String(url);
   if (!href.startsWith('http://immich.test/')) return nativeFetch(url, options);
+  immichCalls.push({
+    href,
+    method: options.method || 'GET',
+    apiKey: options.headers?.['x-api-key'],
+  });
   if (href.endsWith('/api/users/me')) {
     return Response.json({ id: 'user-1', name: 'Test User', email: 'test@example.com' });
   }
@@ -69,6 +76,14 @@ test('GET /api/auth/profiles returns empty list on fresh install', async () => {
   const profiles = await res.json();
   assert.ok(Array.isArray(profiles));
   assert.equal(profiles.length, 0, 'bootstrap profile has no passphrase so is excluded');
+});
+
+test('unauthenticated root serves the login page without dashboard bootstrap', async () => {
+  const res = await apiFetch('/');
+  assert.equal(res.status, 200);
+  const html = await res.text();
+  assert.match(html, /PhotoDesk — Sign in/);
+  assert.doesNotMatch(html, /src="app\.js"/);
 });
 
 test('POST /api/auth/setup creates the first parent profile', async () => {
@@ -127,6 +142,30 @@ test('POST /api/auth/login with wrong passphrase returns 401', async () => {
   assert.equal(res.status, 401);
 });
 
+test('auth routes reject non-string passphrases without throwing', async () => {
+  const profilesRes = await apiFetch('/api/auth/profiles');
+  const profiles = await profilesRes.json();
+  const parentProfile = profiles.find(p => p.role === 'parent');
+
+  const loginRes = await apiFetch('/api/auth/login', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ profileId: parentProfile.id, passphrase: { value: 'bad' } }),
+  });
+  assert.equal(loginRes.status, 400);
+
+  const createRes = await authedFetch('/api/auth/admin/profiles', parentCookie, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      displayName: 'Invalid Passphrase',
+      role: 'kid',
+      passphrase: { value: 'bad' },
+    }),
+  });
+  assert.equal(createRes.status, 400);
+});
+
 test('GET /api/auth/me returns profile info when authenticated', async () => {
   const res = await authedFetch('/api/auth/me', parentCookie);
   assert.equal(res.status, 200);
@@ -145,6 +184,7 @@ test('GET /api/auth/me returns 401 without cookie', async () => {
 
 let kidProfileId;
 let kidCookie;
+let parentSessionId;
 
 test('sessions are scoped to the authenticated profile', async () => {
   // Create a second profile (kid) via admin API
@@ -172,14 +212,14 @@ test('sessions are scoped to the authenticated profile', async () => {
 
   // Create a culling session as parent (directly in DB to avoid Immich calls)
   const parentProfile = db.prepare("SELECT id FROM profiles WHERE role = 'parent' LIMIT 1").get();
-  const sessionId = Number(db.prepare(`
+  parentSessionId = Number(db.prepare(`
     INSERT INTO sessions (name, total_assets, total_scenes, profile_id)
     VALUES ('Parent Session', 1, 1, ?)
   `).run(parentProfile.id).lastInsertRowid);
   db.prepare(`
     INSERT INTO scenes (session_id, scene_index, asset_ids)
     VALUES (?, 0, ?)
-  `).run(sessionId, JSON.stringify([{ id: 'asset-1', width: 100, height: 100, originalFileName: 'a.jpg', fileCreatedAt: '' }]));
+  `).run(parentSessionId, JSON.stringify([{ id: 'asset-1', width: 100, height: 100, originalFileName: 'a.jpg', fileCreatedAt: '' }]));
 
   // Fetch sessions as kid — should not see parent's session
   const kidSessionsRes = await authedFetch('/api/sessions', kidCookie);
@@ -187,6 +227,53 @@ test('sessions are scoped to the authenticated profile', async () => {
   const kidSessions = await kidSessionsRes.json();
   const parentSessionIds = kidSessions.filter(s => s.name === 'Parent Session');
   assert.equal(parentSessionIds.length, 0, 'kid should not see parent sessions');
+});
+
+test('profiles without an enrolled key never fall back to the server key', async () => {
+  immichCalls.length = 0;
+  const res = await authedFetch('/api/health', kidCookie);
+  assert.equal(res.status, 200);
+  assert.deepEqual(await res.json(), { immich: 'disconnected', apiKeySet: false });
+  assert.equal(immichCalls.length, 0);
+});
+
+test('rendered edits cannot be fetched across profile boundaries', async () => {
+  const db = getDb();
+  fs.mkdirSync(process.env.PHOTODESK_EDIT_DIR, { recursive: true });
+  const renderedPath = 'profile-1/private-edit.jpg';
+  const absolutePath = path.join(process.env.PHOTODESK_EDIT_DIR, renderedPath);
+  fs.mkdirSync(path.dirname(absolutePath), { recursive: true });
+  fs.writeFileSync(absolutePath, Buffer.from('private derivative'));
+  db.prepare(`
+    INSERT INTO edits (
+      session_id, asset_id, rendered_path, render_status
+    ) VALUES (?, 'asset-1', ?, 'ready')
+  `).run(parentSessionId, renderedPath);
+
+  const parentResponse = await authedFetch(
+    `/api/edits/${parentSessionId}/asset-1/image`,
+    parentCookie
+  );
+  assert.equal(parentResponse.status, 200);
+
+  const kidResponse = await authedFetch(
+    `/api/edits/${parentSessionId}/asset-1/image`,
+    kidCookie
+  );
+  assert.equal(kidResponse.status, 404);
+});
+
+test('expired ISO auth sessions are rejected immediately', async () => {
+  const db = getDb();
+  const token = crypto.randomUUID();
+  const expiredAt = new Date(Date.now() - 60_000).toISOString();
+  db.prepare(`
+    INSERT INTO auth_sessions (token, profile_id, expires_at)
+    VALUES (?, 1, ?)
+  `).run(token, expiredAt);
+
+  const res = await authedFetch('/api/auth/me', `pd_session=${token}`);
+  assert.equal(res.status, 401);
 });
 
 test('unauthenticated requests to /api routes return 401', async () => {

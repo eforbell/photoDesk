@@ -179,7 +179,17 @@ function readCachedSnapshot(db, profileId, refresh = false) {
 }
 
 function processedAssetIds(db, profileId) {
-  const rows = db.prepare('SELECT asset_id FROM processed_assets WHERE profile_id = ?').all(profileId);
+  const rows = db.prepare(`
+    SELECT asset_id
+    FROM processed_assets
+    WHERE profile_id = ?
+    UNION
+    SELECT edits.immich_asset_id AS asset_id
+    FROM edits
+    JOIN sessions ON sessions.id = edits.session_id
+    WHERE sessions.profile_id = ?
+      AND edits.immich_asset_id IS NOT NULL
+  `).all(profileId, profileId);
   return new Set(rows.map(row => row.asset_id));
 }
 

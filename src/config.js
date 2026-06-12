@@ -11,8 +11,4 @@ const config = {
 
 process.env.TZ = config.timezone;
 
-if (!config.immichApiKey) {
-  console.warn('[config] Warning: IMMICH_API_KEY not set. Set it in .env before using the app.');
-}
-
 module.exports = config;

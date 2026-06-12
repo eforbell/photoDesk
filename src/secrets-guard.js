@@ -22,10 +22,14 @@ function getEnvPatterns() {
   return patterns;
 }
 
-function sanitizeString(str) {
+function sanitizeString(str, additionalSecrets = []) {
   if (typeof str !== 'string') return str;
   let result = str;
-  for (const val of getEnvPatterns()) {
+  const patterns = [
+    ...getEnvPatterns(),
+    ...additionalSecrets.filter(val => typeof val === 'string' && val.length >= 8),
+  ];
+  for (const val of patterns) {
     if (result.includes(val)) {
       result = result.split(val).join('[REDACTED]');
     }
@@ -33,18 +37,20 @@ function sanitizeString(str) {
   return result;
 }
 
-function sanitizeForLog(obj) {
+function sanitizeForLog(obj, additionalSecrets = []) {
   if (obj === null || obj === undefined) return obj;
-  if (typeof obj === 'string') return sanitizeString(obj);
+  if (typeof obj === 'string') return sanitizeString(obj, additionalSecrets);
   if (typeof obj !== 'object') return obj;
-  if (Array.isArray(obj)) return obj.map(sanitizeForLog);
+  if (Array.isArray(obj)) {
+    return obj.map(value => sanitizeForLog(value, additionalSecrets));
+  }
 
   const result = {};
   for (const [key, value] of Object.entries(obj)) {
     if (REDACTED_FIELDS.has(key.toLowerCase())) {
       result[key] = '[REDACTED]';
     } else {
-      result[key] = sanitizeForLog(value);
+      result[key] = sanitizeForLog(value, additionalSecrets);
     }
   }
   return result;

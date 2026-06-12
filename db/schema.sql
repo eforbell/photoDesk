@@ -135,6 +135,7 @@ CREATE TABLE commit_runs (
 );
 
 CREATE INDEX idx_scenes_session ON scenes(session_id, scene_index);
+CREATE INDEX idx_sessions_profile ON sessions(profile_id, created_at);
 CREATE INDEX idx_decisions_session ON decisions(session_id);
 CREATE INDEX idx_ratings_session ON ratings(session_id);
 CREATE INDEX idx_stack_groups_session ON stack_groups(session_id);

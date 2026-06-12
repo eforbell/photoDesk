@@ -15,6 +15,7 @@ const {
   requireParent,
 } = require('../auth');
 const { invalidateLibraryCache } = require('../library');
+const { assertNoSecrets, sanitizeString } = require('../secrets-guard');
 
 router.get('/profiles', (req, res) => {
   const db = getDb();
@@ -24,12 +25,13 @@ router.get('/profiles', (req, res) => {
     WHERE status IN ('active', 'setup') AND passphrase_hash IS NOT NULL
     ORDER BY role DESC, display_name
   `).all();
+  assertNoSecrets(profiles);
   res.json(profiles);
 });
 
 router.post('/login', (req, res) => {
   const { profileId, passphrase } = req.body || {};
-  if (!profileId || !passphrase) {
+  if (!Number.isInteger(Number(profileId)) || typeof passphrase !== 'string' || !passphrase) {
     return res.status(400).json({ error: 'Profile and passphrase are required' });
   }
   const db = getDb();
@@ -65,7 +67,8 @@ router.post('/logout', (req, res) => {
 
 router.post('/setup', (req, res) => {
   const { displayName, passphrase } = req.body || {};
-  if (!displayName || !passphrase) {
+  const normalizedName = typeof displayName === 'string' ? displayName.trim() : '';
+  if (!normalizedName || typeof passphrase !== 'string' || !passphrase) {
     return res.status(400).json({ error: 'Display name and passphrase are required' });
   }
   if (passphrase.length < 4) {
@@ -82,7 +85,7 @@ router.post('/setup', (req, res) => {
     UPDATE profiles
     SET display_name = ?, passphrase_hash = ?, status = 'active'
     WHERE id = 1
-  `).run(displayName, hash);
+  `).run(normalizedName, hash);
   const session = createSession(db, 1);
   res.cookie(COOKIE_NAME, session.token, {
     httpOnly: true,
@@ -134,8 +137,12 @@ router.post('/immich-credential', requireAuth, async (req, res) => {
       immichUserId: immichUser.id,
     });
   } catch (err) {
+    console.error(
+      '[auth] Immich credential verification failed:',
+      sanitizeString(err.message, [trimmedKey])
+    );
     res.status(400).json({
-      error: `Could not verify key with Immich: ${err.message}`,
+      error: 'Could not verify key with Immich. Check the key, URL, and required permissions.',
     });
   }
 });
@@ -147,13 +154,15 @@ router.get('/admin/profiles', requireParent, (req, res) => {
     FROM profiles
     ORDER BY id
   `).all();
+  assertNoSecrets(profiles);
   res.json(profiles);
 });
 
 router.post('/admin/profiles', requireParent, (req, res) => {
   const { displayName, role = 'kid', passphrase } = req.body || {};
-  if (!displayName) return res.status(400).json({ error: 'Display name is required' });
-  if (!passphrase || passphrase.length < 4) {
+  const normalizedName = typeof displayName === 'string' ? displayName.trim() : '';
+  if (!normalizedName) return res.status(400).json({ error: 'Display name is required' });
+  if (typeof passphrase !== 'string' || passphrase.length < 4) {
     return res.status(400).json({ error: 'Passphrase must be at least 4 characters' });
   }
   if (!['parent', 'kid'].includes(role)) {
@@ -165,11 +174,11 @@ router.post('/admin/profiles', requireParent, (req, res) => {
     const result = db.prepare(`
       INSERT INTO profiles (display_name, role, passphrase_hash, status)
       VALUES (?, ?, ?, 'setup')
-    `).run(displayName, role, hash);
+    `).run(normalizedName, role, hash);
     res.status(201).json({
       ok: true,
       profileId: Number(result.lastInsertRowid),
-      displayName,
+      displayName: normalizedName,
       role,
     });
   } catch (err) {
@@ -200,7 +209,10 @@ router.patch('/admin/profiles/:id', requireParent, (req, res) => {
     db.prepare("UPDATE profiles SET status = 'active' WHERE id = ?").run(profileId);
     return res.json({ ok: true, status: 'active' });
   }
-  if (passphrase) {
+  if (passphrase !== undefined) {
+    if (typeof passphrase !== 'string') {
+      return res.status(400).json({ error: 'Passphrase must be a string' });
+    }
     if (passphrase.length < 4) {
       return res.status(400).json({ error: 'Passphrase must be at least 4 characters' });
     }

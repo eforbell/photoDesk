@@ -9,6 +9,7 @@ const {
   BASELINE_SHAPE,
   migrateDatabase,
 } = require('../db/migrate');
+const { bootstrapProfileCredential } = require('../src/db');
 
 function silentLogger() {
   return { log() {} };
@@ -73,6 +74,45 @@ test('migration runner is idempotent', () => {
   }
 });
 
+test('existing environment credential seeds only the untouched bootstrap profile', () => {
+  const temp = tempDatabase();
+  const db = new Database(temp.path);
+  const previousKey = process.env.IMMICH_API_KEY;
+  const previousUrl = process.env.IMMICH_URL;
+  try {
+    migrateDatabase(db, { logger: silentLogger() });
+    process.env.IMMICH_API_KEY = 'existing-production-key';
+    process.env.IMMICH_URL = 'http://immich.production';
+
+    assert.equal(bootstrapProfileCredential(db), 1);
+    assert.deepEqual(
+      db.prepare('SELECT immich_api_key, immich_url FROM profiles WHERE id = 1').get(),
+      {
+        immich_api_key: 'existing-production-key',
+        immich_url: 'http://immich.production',
+      }
+    );
+
+    db.prepare(`
+      UPDATE profiles
+      SET passphrase_hash = 'configured', immich_api_key = NULL
+      WHERE id = 1
+    `).run();
+    assert.equal(bootstrapProfileCredential(db), 0);
+    assert.equal(
+      db.prepare('SELECT immich_api_key FROM profiles WHERE id = 1').get().immich_api_key,
+      null
+    );
+  } finally {
+    if (previousKey === undefined) delete process.env.IMMICH_API_KEY;
+    else process.env.IMMICH_API_KEY = previousKey;
+    if (previousUrl === undefined) delete process.env.IMMICH_URL;
+    else process.env.IMMICH_URL = previousUrl;
+    db.close();
+    temp.cleanup();
+  }
+});
+
 test('existing matching database adopts the baseline without losing data', () => {
   const temp = tempDatabase();
   const db = new Database(temp.path);
@@ -110,6 +150,7 @@ test('existing matching database adopts the baseline without losing data', () =>
         .map(row => row.name)
     );
     assert.ok(indexes.has('idx_scenes_session'));
+    assert.ok(indexes.has('idx_sessions_profile'));
   } finally {
     db.close();
     temp.cleanup();

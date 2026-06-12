@@ -51,6 +51,7 @@ INSERT INTO sessions_new (id, name, created_at, total_assets, total_scenes, immi
   FROM sessions;
 DROP TABLE sessions;
 ALTER TABLE sessions_new RENAME TO sessions;
+CREATE INDEX idx_sessions_profile ON sessions(profile_id, created_at);
 
 -- 5. Rebuild processed_assets: change from asset_id PRIMARY KEY to UNIQUE(profile_id, asset_id)
 CREATE TABLE processed_assets_new (

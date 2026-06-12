@@ -196,3 +196,17 @@
 - Full automated suite: 44 passing tests. Browser validation confirmed the Commit screen reports the ownership boundary before confirmation or remote writes.
 - **Learning:** Immich timeline visibility is broader than write authority. PhotoDesk must treat asset ownership and endpoint capability as explicit data, not infer writability from successful discovery or preview access.
 - PR review fixed the legacy-session fallback import, added direct coverage for remote owner resolution, and parallelized transitional asset-info lookups. Immich's metadata search schema exposes no owner or partner-exclusion filter, so owned-library scoping must continue filtering response `ownerId` values client-side.
+---
+
+## 2026-06-12 — Feature #5 PR Review Hardening
+- Reviewed the household-profile migration, authentication boundary, per-profile Immich credential threading, local derivative access, discovery state, and deploy path.
+- Removed the global API-key fallback for profiles without an enrolled credential and added regression coverage proving those profiles remain disconnected.
+- Closed a cross-profile rendered-edit disclosure by enforcing session ownership on derivative image responses.
+- Restored profile-scoped uploaded edit reconciliation so committed derivatives do not re-enter discovery.
+- Corrected auth-session expiry comparisons for ISO timestamps and hardened passphrase input handling.
+- Preserved the existing production Immich key by seeding only the untouched bootstrap profile during migration startup.
+- Activated the secrets guard for profile query responses and per-profile credential verification logs.
+- Updated deployment to stop PhotoDesk and back up SQLite before running the table-rebuild migration.
+- Fixed unauthenticated `/` handling so the login page is served directly without a dashboard flash or avoidable 401 requests.
+- Full suite after review hardening: 65 passing tests. Browser smoke coverage passed fresh setup and authenticated library rendering at desktop and 390×844.
+- **Queued:** parent profile-management UI, existing-key rotation UI, self-service passphrase change, and full two-profile review/edit/commit browser testing.

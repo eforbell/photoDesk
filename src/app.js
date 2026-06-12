@@ -21,7 +21,7 @@ app.use('/api', (req, res, next) => {
   next();
 }, apiRouter);
 
-app.use(express.static(path.join(__dirname, '..', 'public')));
+app.use(express.static(path.join(__dirname, '..', 'public'), { index: false }));
 
 app.get('*', (req, res) => {
   if (!req.profile) {
