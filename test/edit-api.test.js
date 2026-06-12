@@ -27,11 +27,37 @@ global.fetch = async (url, options) => {
   return nativeFetch(url, options);
 };
 
+const crypto = require('crypto');
 const app = require('../src/app');
 const { getDb } = require('../src/db');
 
 let server;
 let baseUrl;
+let authToken;
+
+function authFetch(url, options = {}) {
+  const headers = { ...options.headers, cookie: `pd_session=${authToken}` };
+  return nativeFetch(url, { ...options, headers });
+}
+
+function authenticateProfile() {
+  const db = getDb();
+  db.prepare(`
+    UPDATE profiles
+    SET immich_api_key = 'test-key',
+        immich_user_id = 'user-1',
+        immich_verified_at = datetime('now'),
+        status = 'active',
+        passphrase_hash = 'not-used'
+    WHERE id = 1
+  `).run();
+  const token = crypto.randomUUID();
+  const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
+  db.prepare(
+    'INSERT INTO auth_sessions (token, profile_id, expires_at) VALUES (?, 1, ?)'
+  ).run(token, expiresAt);
+  return token;
+}
 
 test.before(async () => {
   originalResponse = await sharp({
@@ -44,6 +70,7 @@ test.before(async () => {
   }).jpeg().toBuffer();
 
   const db = getDb();
+  authToken = authenticateProfile();
   const sessionId = db.prepare(`
     INSERT INTO sessions (name, total_assets, total_scenes)
     VALUES ('Render test', 1, 1)
@@ -73,7 +100,7 @@ test.after(async () => {
 });
 
 test('edit API renders, serves, and removes a durable derivative', async () => {
-  const response = await nativeFetch(`${baseUrl}/api/edits`, {
+  const response = await authFetch(`${baseUrl}/api/edits`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({
@@ -89,14 +116,14 @@ test('edit API renders, serves, and removes a durable derivative', async () => {
   assert.equal(edit.render_error, null);
   assert.ok(fs.existsSync(path.join(process.env.PHOTODESK_EDIT_DIR, edit.rendered_path)));
 
-  const imageResponse = await nativeFetch(`${baseUrl}/api/edits/1/asset-1/image`);
+  const imageResponse = await authFetch(`${baseUrl}/api/edits/1/asset-1/image`);
   assert.equal(imageResponse.status, 200);
   assert.equal(imageResponse.headers.get('content-type'), 'image/jpeg');
   const metadata = await sharp(Buffer.from(await imageResponse.arrayBuffer())).metadata();
   assert.equal(metadata.width, 240);
   assert.equal(metadata.height, 240);
 
-  const deleteResponse = await nativeFetch(`${baseUrl}/api/edits`, {
+  const deleteResponse = await authFetch(`${baseUrl}/api/edits`, {
     method: 'DELETE',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ sessionId: 1, assetId: 'asset-1' }),
@@ -106,7 +133,7 @@ test('edit API renders, serves, and removes a durable derivative', async () => {
 });
 
 test('validates session membership before entering the render lock', async () => {
-  const missingSession = await nativeFetch(`${baseUrl}/api/edits`, {
+  const missingSession = await authFetch(`${baseUrl}/api/edits`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({
@@ -118,7 +145,7 @@ test('validates session membership before entering the render lock', async () =>
   });
   assert.equal(missingSession.status, 404);
 
-  const foreignAsset = await nativeFetch(`${baseUrl}/api/edits`, {
+  const foreignAsset = await authFetch(`${baseUrl}/api/edits`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({
@@ -133,7 +160,7 @@ test('validates session membership before entering the render lock', async () =>
 
 test('failed re-renders preserve the previous ready derivative and recipe', async () => {
   originalFailure = null;
-  const readyResponse = await nativeFetch(`${baseUrl}/api/edits`, {
+  const readyResponse = await authFetch(`${baseUrl}/api/edits`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({
@@ -150,7 +177,7 @@ test('failed re-renders preserve the previous ready derivative and recipe', asyn
   assert.ok(fs.existsSync(renderedFile));
 
   originalFailure = new Error('decoder unavailable');
-  const response = await nativeFetch(`${baseUrl}/api/edits`, {
+  const response = await authFetch(`${baseUrl}/api/edits`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({
@@ -171,7 +198,7 @@ test('failed re-renders preserve the previous ready derivative and recipe', asyn
 
 test('render failures do not expose local filesystem paths', async () => {
   originalFailure = new Error(`decoder failed while reading ${path.join(tempDir, 'secret-input.jpg')}`);
-  const response = await nativeFetch(`${baseUrl}/api/edits`, {
+  const response = await authFetch(`${baseUrl}/api/edits`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({
@@ -209,7 +236,7 @@ test('database update failure preserves the previous pointer, recipe, and bytes'
   };
 
   try {
-    const response = await nativeFetch(`${baseUrl}/api/edits`, {
+    const response = await authFetch(`${baseUrl}/api/edits`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
@@ -253,7 +280,7 @@ test('serializes overlapping saves so the final recipe matches the final derivat
     });
   };
 
-  const save = exposure => nativeFetch(`${baseUrl}/api/edits`, {
+  const save = exposure => authFetch(`${baseUrl}/api/edits`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({
@@ -289,7 +316,7 @@ test('serializes delete behind an active render and leaves no orphan file', asyn
     });
   };
 
-  const savePromise = nativeFetch(`${baseUrl}/api/edits`, {
+  const savePromise = authFetch(`${baseUrl}/api/edits`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({
@@ -300,7 +327,7 @@ test('serializes delete behind an active render and leaves no orphan file', asyn
     }),
   });
   await requested;
-  const deletePromise = nativeFetch(`${baseUrl}/api/edits`, {
+  const deletePromise = authFetch(`${baseUrl}/api/edits`, {
     method: 'DELETE',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ sessionId: 1, assetId: 'asset-1' }),
