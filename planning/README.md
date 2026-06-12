@@ -20,12 +20,9 @@ Feature-driven development tracking for PhotoDesk, the photo review & light-edit
 | 1 | Visual System + Workspace Redesign | shipped |
 | 2 | Library / Discover Screen | shipped |
 | 3 | Editor (Crop + Adjustments + Presets) | shipped |
-| 4 | Commit Hardening + Edited Asset Upload | ready for review |
-
-Unscheduled feature concepts:
-
-- Household Profiles + Scoped Immich Credentials — backlog discovery; not
-  designated as the next feature.
+| 4 | Commit Hardening + Edited Asset Upload | shipped |
+| 5 | Household Profiles + Scoped Immich Credentials | shipped |
+| 6 | Editor Interaction Upgrades | ready for review |
 
 ## Design Reference
 

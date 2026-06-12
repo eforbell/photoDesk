@@ -23,6 +23,40 @@ const NEUTRAL = {
   vignette: 0,
 };
 
+function splitColorImage(width, height) {
+  const pixels = Buffer.alloc(width * height * 3);
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const offset = (y * width + x) * 3;
+      const left = x < width / 2;
+      pixels[offset] = left ? 240 : 10;
+      pixels[offset + 1] = 10;
+      pixels[offset + 2] = left ? 10 : 240;
+    }
+  }
+  return sharp(pixels, { raw: { width, height, channels: 3 } });
+}
+
+function quadrantImage(width, height) {
+  const pixels = Buffer.alloc(width * height * 3);
+  const colors = [
+    [240, 10, 10],
+    [10, 10, 240],
+    [10, 220, 10],
+    [230, 210, 10],
+  ];
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const quadrant = (y >= height / 2 ? 2 : 0) + (x >= width / 2 ? 1 : 0);
+      const offset = (y * width + x) * 3;
+      pixels[offset] = colors[quadrant][0];
+      pixels[offset + 1] = colors[quadrant][1];
+      pixels[offset + 2] = colors[quadrant][2];
+    }
+  }
+  return sharp(pixels, { raw: { width, height, channels: 3 } });
+}
+
 test('converts normalized crops into bounded pixel regions', () => {
   assert.deepEqual(
     pixelCrop({ x: 0.25, y: 0, width: 0.5, height: 1 }, 400, 300),
@@ -63,6 +97,58 @@ test('renders deterministic JPEG dimensions from a crop recipe', async () => {
   assert.equal(result.info.height, 300);
   const metadata = await sharp(result.data).metadata();
   assert.equal(metadata.orientation, 1);
+});
+
+test('renders the selected off-center region rather than a centered crop', async () => {
+  const input = await splitColorImage(200, 100).png().toBuffer();
+  const result = await renderEditBuffer(input, NEUTRAL, {
+    aspect: 'Free',
+    x: 0.5,
+    y: 0,
+    width: 0.5,
+    height: 1,
+  });
+  assert.equal(result.info.width, 100);
+  assert.equal(result.info.height, 100);
+  const stats = await sharp(result.data).stats();
+  assert.ok(stats.channels[2].mean > 220);
+  assert.ok(stats.channels[0].mean < 30);
+});
+
+test('renders an arbitrary Free crop from an off-center portrait region', async () => {
+  const input = await quadrantImage(100, 200).png().toBuffer();
+  const result = await renderEditBuffer(input, NEUTRAL, {
+    aspect: 'Free',
+    x: 0,
+    y: 0.5,
+    width: 0.5,
+    height: 0.5,
+  });
+  assert.equal(result.info.width, 50);
+  assert.equal(result.info.height, 100);
+  const stats = await sharp(result.data).stats();
+  assert.ok(stats.channels[1].mean > 190);
+  assert.ok(stats.channels[0].mean < 35);
+  assert.ok(stats.channels[2].mean < 35);
+});
+
+test('applies off-center crop coordinates after EXIF auto-orientation', async () => {
+  const input = await splitColorImage(120, 80)
+    .jpeg()
+    .withMetadata({ orientation: 6 })
+    .toBuffer();
+  const result = await renderEditBuffer(input, NEUTRAL, {
+    aspect: 'Free',
+    x: 0,
+    y: 0,
+    width: 1,
+    height: 0.5,
+  });
+  assert.equal(result.info.width, 80);
+  assert.equal(result.info.height, 60);
+  const stats = await sharp(result.data).stats();
+  assert.ok(stats.channels[0].mean > 220);
+  assert.ok(stats.channels[2].mean < 30);
 });
 
 test('writes rendered files atomically inside the configured edit directory', async () => {

@@ -1521,6 +1521,10 @@ function openEditor(assetId) {
   state.editorTool = 'adjust';
   state.editorAdjustments = PhotoDeskEditor.normalizeAdjustments(edit?.adjustments);
   state.editorCrop = edit?.crop || PhotoDeskEditor.cropForAspect(meta, 'Original');
+  const matchedPreset = PhotoDeskEditor.matchingPreset(state.editorAdjustments);
+  state.editorPresetId = matchedPreset?.id || null;
+  state.editorPresetIntensity = 100;
+  state.editorCropDrag = null;
   state.editorOriginal = editorDraftValue();
   $('editor').classList.remove('hidden');
   $('keyboard-legend').style.display = 'none';
@@ -1528,6 +1532,7 @@ function openEditor(assetId) {
 }
 
 function closeEditor() {
+  endEditorCropDrag();
   state.editorOpen = false;
   state.editorAssetId = null;
   $('editor').classList.add('hidden');
@@ -1539,12 +1544,20 @@ function closeEditor() {
   }
 }
 
-function editorAspectRatio() {
+function editorSourceAspectRatio() {
   const meta = state.assetMeta[state.editorAssetId] || {};
   return PhotoDeskEditor.ratioValue(
     'Original',
     meta.width,
     meta.height
+  );
+}
+
+function editorPreviewAspectRatio() {
+  if (state.editorTool === 'crop') return editorSourceAspectRatio();
+  return PhotoDeskEditor.cropDisplayAspect(
+    state.editorCrop,
+    state.assetMeta[state.editorAssetId]
   );
 }
 
@@ -1561,7 +1574,7 @@ function updateEditorFrameSize() {
   const size = PhotoDeskEditor.containSize(
     availableWidth,
     availableHeight,
-    editorAspectRatio(),
+    editorPreviewAspectRatio(),
     1100
   );
   const frame = $('editor-image-frame');
@@ -1570,13 +1583,15 @@ function updateEditorFrameSize() {
 }
 
 function updateEditorCropOverlay() {
-  const overlay = $('editor-thirds');
+  const overlay = $('editor-crop-window');
   const crop = state.editorCrop || { x: 0, y: 0, width: 1, height: 1 };
   overlay.style.left = `${crop.x * 100}%`;
   overlay.style.top = `${crop.y * 100}%`;
   overlay.style.width = `${crop.width * 100}%`;
   overlay.style.height = `${crop.height * 100}%`;
   overlay.classList.toggle('hidden', state.editorTool !== 'crop');
+  overlay.classList.toggle('is-active', Boolean(state.editorCropDrag));
+  overlay.classList.toggle('is-free', crop.aspect === 'Free');
 }
 
 function histogramSvg(seed, exposure) {
@@ -1604,11 +1619,24 @@ function histogramSvg(seed, exposure) {
 function updateEditorPreview() {
   const adjustments = state.editorAdjustments;
   const frame = $('editor-image-frame');
-  $('editor-image').style.filter = PhotoDeskEditor.adjustmentFilter(adjustments);
+  const sourceImage = $('editor-image');
+  const croppedImage = $('editor-cropped-image');
+  const filter = PhotoDeskEditor.adjustmentFilter(adjustments);
+  sourceImage.style.filter = filter;
+  croppedImage.style.filter = filter;
   $('editor-temp-overlay').style.background = PhotoDeskEditor.temperatureOverlay(adjustments);
   $('editor-vignette-overlay').style.background = PhotoDeskEditor.vignetteOverlay(adjustments);
-  frame.style.aspectRatio = editorAspectRatio();
+  frame.style.aspectRatio = editorPreviewAspectRatio();
   updateEditorFrameSize();
+  const showingCrop = state.editorTool === 'crop';
+  sourceImage.classList.toggle('hidden', !showingCrop);
+  croppedImage.classList.toggle('hidden', showingCrop);
+  if (!showingCrop) {
+    const background = PhotoDeskEditor.cropBackground(state.editorCrop);
+    croppedImage.style.backgroundImage = `url("${sourceImage.src}")`;
+    croppedImage.style.backgroundSize = background.backgroundSize;
+    croppedImage.style.backgroundPosition = background.backgroundPosition;
+  }
   updateEditorCropOverlay();
   $('editor-histogram').innerHTML = histogramSvg(
     state.editorAssetId,
@@ -1621,6 +1649,72 @@ function updateEditorPreview() {
   $('editor-save').disabled = false;
   $('editor-save').classList.toggle('is-dirty', dirty);
   $('editor-reset').disabled = PhotoDeskEditor.isNeutralEdit(adjustments, state.editorCrop);
+}
+
+function endEditorCropDrag(pointerId) {
+  const cropWindow = $('editor-crop-window');
+  const hadDrag = Boolean(state.editorCropDrag);
+  state.editorCropDrag = null;
+  if (pointerId != null && cropWindow.hasPointerCapture?.(pointerId)) {
+    cropWindow.releasePointerCapture(pointerId);
+  }
+  cropWindow.classList.remove('is-active');
+  if (hadDrag && state.editorOpen && state.editorTool === 'crop') {
+    renderEditorCropControls();
+    updateEditorSaveState();
+  }
+}
+
+function beginEditorCropDrag(event) {
+  if (state.editorTool !== 'crop' || event.button > 0) return;
+  event.preventDefault();
+  const cropWindow = $('editor-crop-window');
+  const frame = $('editor-image-frame');
+  const rect = frame.getBoundingClientRect();
+  const handle = event.target.closest('[data-crop-handle]')?.dataset.cropHandle || 'move';
+  state.editorCropDrag = {
+    pointerId: event.pointerId,
+    handle,
+    startX: event.clientX,
+    startY: event.clientY,
+    crop: { ...state.editorCrop },
+    frameWidth: rect.width,
+    frameHeight: rect.height,
+  };
+  cropWindow.setPointerCapture?.(event.pointerId);
+  updateEditorCropOverlay();
+}
+
+function moveEditorCropDrag(event) {
+  const drag = state.editorCropDrag;
+  if (!drag || drag.pointerId !== event.pointerId) return;
+  event.preventDefault();
+  const meta = state.assetMeta[state.editorAssetId] || {};
+  state.editorCrop = PhotoDeskEditor.transformCrop(drag.crop, {
+    handle: drag.handle,
+    deltaX: event.clientX - drag.startX,
+    deltaY: event.clientY - drag.startY,
+    frameWidth: drag.frameWidth,
+    frameHeight: drag.frameHeight,
+    aspect: drag.crop.aspect,
+    sourceWidth: meta.width,
+    sourceHeight: meta.height,
+  });
+  updateEditorCropOverlay();
+  updateEditorSaveState();
+}
+
+function updateEditorSaveState() {
+  const dirty = editorDirty();
+  $('editor-save').textContent = dirty
+    ? (PhotoDeskEditor.isNeutralEdit(state.editorAdjustments, state.editorCrop) ? 'Remove edit' : 'Save edit')
+    : 'Done';
+  $('editor-save').disabled = false;
+  $('editor-save').classList.toggle('is-dirty', dirty);
+  $('editor-reset').disabled = PhotoDeskEditor.isNeutralEdit(
+    state.editorAdjustments,
+    state.editorCrop
+  );
 }
 
 function renderEditorRating() {
@@ -1641,9 +1735,33 @@ function renderEditorRating() {
 }
 
 function renderEditorAdjustControls() {
-  const presets = PhotoDeskEditor.PRESETS.map(preset => `
-    <button class="editor-preset" data-preset="${preset.id}">${preset.name}</button>
+  const source = `/api/proxy/thumbnail/${state.editorAssetId}`;
+  const selectedPreset = PhotoDeskEditor.PRESETS.find(
+    preset => preset.id === state.editorPresetId
+  );
+  const profileGroups = PhotoDeskEditor.PROFILE_GROUPS.map(group => `
+    <section class="editor-profile-group">
+      <div class="editor-profile-group-label">${group}</div>
+      <div class="editor-profile-grid">
+        ${PhotoDeskEditor.PRESETS.filter(preset => preset.group === group).map(preset => {
+          const adjustments = PhotoDeskEditor.normalizeAdjustments(preset.adj);
+          return `<button class="editor-profile ${state.editorPresetId === preset.id ? 'active' : ''}" data-preset="${preset.id}">
+            <span class="editor-profile-preview">
+              <img src="${source}" alt="" style="filter:${PhotoDeskEditor.adjustmentFilter(adjustments)}" />
+              <span class="editor-profile-temp" style="background:${PhotoDeskEditor.temperatureOverlay(adjustments)}"></span>
+              <span class="editor-profile-vignette" style="background:${PhotoDeskEditor.vignetteOverlay(adjustments)}"></span>
+            </span>
+            <span class="editor-profile-name">${preset.name}</span>
+          </button>`;
+        }).join('')}
+      </div>
+    </section>
   `).join('');
+  const presetBase = selectedPreset
+    ? PhotoDeskEditor.scaleAdjustments(selectedPreset.adj, state.editorPresetIntensity)
+    : null;
+  const custom = !presetBase
+    || !PhotoDeskEditor.adjustmentsEqual(state.editorAdjustments, presetBase);
   const groups = EDITOR_SLIDER_GROUPS.map(group => `
     <section class="editor-control-group">
       <div class="editor-eyebrow">${group.label}</div>
@@ -1658,20 +1776,53 @@ function renderEditorAdjustControls() {
     </section>
   `).join('');
   $('editor-controls').innerHTML = `
-    <section class="editor-presets">
-      <div class="editor-eyebrow">Presets</div>
-      <div class="editor-preset-row">${presets}</div>
+    <section class="editor-profiles">
+      <div class="editor-profile-head">
+        <div class="editor-eyebrow">Profiles</div>
+        ${custom ? '<span class="editor-custom-tag">Custom</span>' : ''}
+      </div>
+      ${profileGroups}
     </section>
+    ${selectedPreset && selectedPreset.id !== 'original' ? `
+      <label class="editor-intensity">
+        <span>Intensity</span>
+        <span class="editor-intensity-value mono">${state.editorPresetIntensity}%</span>
+        <input type="range" min="0" max="100" value="${state.editorPresetIntensity}" />
+      </label>
+    ` : ''}
     ${groups}
   `;
 
-  $('editor-controls').querySelectorAll('.editor-preset').forEach(button => {
+  $('editor-controls').querySelectorAll('.editor-profile').forEach(button => {
     button.addEventListener('click', () => {
       const preset = PhotoDeskEditor.PRESETS.find(item => item.id === button.dataset.preset);
-      state.editorAdjustments = PhotoDeskEditor.normalizeAdjustments(preset.adj);
+      state.editorPresetId = preset.id;
+      state.editorPresetIntensity = 100;
+      state.editorAdjustments = PhotoDeskEditor.scaleAdjustments(preset.adj, 100);
       renderEditorControls();
       updateEditorPreview();
     });
+  });
+  const intensity = $('editor-controls').querySelector('.editor-intensity input');
+  intensity?.addEventListener('input', () => {
+    const preset = PhotoDeskEditor.PRESETS.find(item => item.id === state.editorPresetId);
+    state.editorPresetIntensity = Number(intensity.value);
+    state.editorAdjustments = PhotoDeskEditor.scaleAdjustments(
+      preset.adj,
+      state.editorPresetIntensity
+    );
+    $('editor-controls').querySelector('.editor-intensity-value').textContent =
+      `${state.editorPresetIntensity}%`;
+    $('editor-controls').querySelectorAll('.editor-slider').forEach(label => {
+      const key = label.dataset.adjustment;
+      const input = label.querySelector('input');
+      const value = state.editorAdjustments[key];
+      input.value = value;
+      label.querySelector('.editor-slider-value').textContent =
+        `${value > 0 ? '+' : ''}${value}`;
+    });
+    updateEditorCustomTag();
+    updateEditorPreview();
   });
   $('editor-controls').querySelectorAll('.editor-slider').forEach(label => {
     const key = label.dataset.adjustment;
@@ -1680,41 +1831,96 @@ function renderEditorAdjustControls() {
     input.addEventListener('input', () => {
       state.editorAdjustments[key] = Number(input.value);
       value.textContent = `${input.value > 0 ? '+' : ''}${input.value}`;
+      updateEditorCustomTag();
       updateEditorPreview();
     });
     label.querySelector('.editor-slider-label').addEventListener('dblclick', () => {
       state.editorAdjustments[key] = 0;
       input.value = 0;
       value.textContent = '0';
+      updateEditorCustomTag();
       updateEditorPreview();
     });
   });
 }
 
+function updateEditorCustomTag() {
+  const head = $('editor-controls').querySelector('.editor-profile-head');
+  if (!head) return;
+  const preset = PhotoDeskEditor.PRESETS.find(item => item.id === state.editorPresetId);
+  const expected = preset
+    ? PhotoDeskEditor.scaleAdjustments(preset.adj, state.editorPresetIntensity)
+    : null;
+  const custom = !expected
+    || !PhotoDeskEditor.adjustmentsEqual(state.editorAdjustments, expected);
+  const tag = head.querySelector('.editor-custom-tag');
+  if (custom && !tag) {
+    head.insertAdjacentHTML('beforeend', '<span class="editor-custom-tag">Custom</span>');
+  } else if (!custom) {
+    tag?.remove();
+  }
+}
+
 function renderEditorCropControls() {
+  const meta = state.assetMeta[state.editorAssetId] || {};
+  const aspects = state.editorCrop.aspect === '9:16'
+    ? [...PhotoDeskEditor.CROP_ASPECTS, '9:16']
+    : PhotoDeskEditor.CROP_ASPECTS;
   $('editor-controls').innerHTML = `
     <section class="editor-crop-controls">
-      <div class="editor-eyebrow">Aspect ratio</div>
+      <div class="editor-crop-head">
+        <div class="editor-eyebrow">Aspect ratio</div>
+        <button class="editor-flip" ${state.editorCrop.aspect.includes(':') ? '' : 'disabled'}>
+          ${icon('reset', 13)} Flip
+        </button>
+      </div>
       <div class="editor-aspect-grid">
-        ${PhotoDeskEditor.CROP_ASPECTS.map(aspect => `
+        ${aspects.map(aspect => `
           <button class="editor-aspect ${state.editorCrop.aspect === aspect ? 'active' : ''}" data-aspect="${aspect}">
             ${aspect}
           </button>
         `).join('')}
       </div>
-      <p>Crop is centered and saved as normalized coordinates. The original remains untouched.</p>
+      <div class="editor-crop-readout">
+        <div class="editor-eyebrow">Crop region</div>
+        <div class="mono">
+          <span>x <b>${state.editorCrop.x.toFixed(3)}</b></span>
+          <span>y <b>${state.editorCrop.y.toFixed(3)}</b></span>
+          <span>w <b>${state.editorCrop.width.toFixed(3)}</b></span>
+          <span>h <b>${state.editorCrop.height.toFixed(3)}</b></span>
+        </div>
+        <small class="mono">≈ ${Math.round(state.editorCrop.width * (meta.width || 0))} × ${Math.round(state.editorCrop.height * (meta.height || 0))} px</small>
+      </div>
+      <p>Drag to reposition; pull a corner to resize. Free unlocks edge handles. The original remains untouched.</p>
+      <button class="editor-apply-crop">${icon('check', 15, 2.2)} Apply crop &amp; adjust ${icon('arrowR', 15)}</button>
     </section>
   `;
   $('editor-controls').querySelectorAll('.editor-aspect').forEach(button => {
     button.addEventListener('click', () => {
-      state.editorCrop = PhotoDeskEditor.cropForAspect(
-        state.assetMeta[state.editorAssetId],
+      state.editorCrop = PhotoDeskEditor.refitCrop(
+        state.editorCrop,
+        meta,
         button.dataset.aspect
       );
       renderEditorCropControls();
       updateEditorPreview();
     });
   });
+  $('editor-controls').querySelector('.editor-flip').addEventListener('click', () => {
+    const flipped = PhotoDeskEditor.flipAspect(state.editorCrop.aspect);
+    state.editorCrop = PhotoDeskEditor.refitCrop(state.editorCrop, meta, flipped);
+    renderEditorCropControls();
+    updateEditorPreview();
+  });
+  $('editor-controls').querySelector('.editor-apply-crop').addEventListener('click', () => {
+    setEditorTool('adjust');
+  });
+}
+
+function setEditorTool(tool) {
+  endEditorCropDrag();
+  state.editorTool = tool;
+  renderEditor();
 }
 
 function renderEditorControls() {
@@ -1805,10 +2011,14 @@ $('editor-reset').addEventListener('click', () => {
 });
 document.querySelectorAll('.editor-tool').forEach(button => {
   button.addEventListener('click', () => {
-    state.editorTool = button.dataset.editorTool;
-    renderEditor();
+    setEditorTool(button.dataset.editorTool);
   });
 });
+$('editor-crop-window').addEventListener('pointerdown', beginEditorCropDrag);
+$('editor-crop-window').addEventListener('pointermove', moveEditorCropDrag);
+$('editor-crop-window').addEventListener('pointerup', event => endEditorCropDrag(event.pointerId));
+$('editor-crop-window').addEventListener('pointercancel', event => endEditorCropDrag(event.pointerId));
+$('editor-crop-window').addEventListener('lostpointercapture', () => endEditorCropDrag());
 new ResizeObserver(() => {
   if (state.editorOpen) updateEditorFrameSize();
 }).observe(document.querySelector('.editor-stage'));

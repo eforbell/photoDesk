@@ -9,7 +9,7 @@ const ADJUSTMENT_KEYS = [
   'vignette',
 ];
 
-const ASPECTS = new Set(['Original', '1:1', '4:5', '5:4', '3:2', '2:3', '16:9']);
+const ASPECTS = new Set(['Free', 'Original', '1:1', '4:5', '5:4', '3:2', '2:3', '16:9', '9:16']);
 
 function validateAdjustments(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
