@@ -150,7 +150,13 @@
         window.location.href = 'login.html';
         throw new Error('Authentication required');
       }
-      const data = await response.json();
+      const contentType = response.headers.get('content-type') || '';
+      const data = contentType.includes('application/json')
+        ? await response.json()
+        : null;
+      if (!data) {
+        throw new Error(`PhotoDesk returned an unexpected response (${response.status})`);
+      }
       if (!response.ok) throw new Error(data.error || `Request failed: ${response.status}`);
       return data;
     }
@@ -161,7 +167,7 @@
     }
 
     async function loadProfiles() {
-      const profiles = await request('api/auth/admin/profiles');
+      const profiles = await request('/api/auth/admin/profiles');
       const list = $('profile-list');
       list.textContent = '';
       profiles.forEach(profile => {
@@ -170,10 +176,10 @@
         const info = document.createElement('div');
         const name = document.createElement('div');
         name.className = 'profile-name';
-        name.textContent = profile.display_name;
+        name.textContent = profile.displayName;
         const meta = document.createElement('div');
         meta.className = 'profile-meta';
-        meta.textContent = `${profile.role} · ${profile.status} · ${profile.immich_connected ? 'Immich connected' : 'needs Immich key'}`;
+        meta.textContent = `${profile.role} · ${profile.status} · ${profile.immichConnected ? 'Immich connected' : 'needs Immich key'}`;
         info.append(name, meta);
 
         const actions = document.createElement('div');
@@ -184,7 +190,7 @@
           toggle.type = 'button';
           toggle.textContent = profile.status === 'disabled' ? 'Enable' : 'Disable';
           toggle.addEventListener('click', async () => {
-            await request(`api/auth/admin/profiles/${profile.id}`, {
+            await request(`/api/auth/admin/profiles/${profile.id}`, {
               method: 'PATCH',
               body: JSON.stringify({ status: profile.status === 'disabled' ? 'active' : 'disabled' }),
             });
@@ -197,14 +203,14 @@
         reset.type = 'button';
         reset.textContent = 'Reset passphrase';
         reset.addEventListener('click', async () => {
-          const passphrase = window.prompt(`New temporary passphrase for ${profile.display_name}:`);
+          const passphrase = window.prompt(`New temporary passphrase for ${profile.displayName}:`);
           if (!passphrase) return;
           try {
-            await request(`api/auth/admin/profiles/${profile.id}`, {
+            await request(`/api/auth/admin/profiles/${profile.id}`, {
               method: 'PATCH',
               body: JSON.stringify({ passphrase }),
             });
-            setStatus($('profile-status'), `Passphrase reset for ${profile.display_name}.`);
+            setStatus($('profile-status'), `Passphrase reset for ${profile.displayName}.`);
           } catch (error) {
             setStatus($('profile-status'), error.message, true);
           }
@@ -220,12 +226,13 @@
       const button = event.submitter;
       button.disabled = true;
       try {
-        const result = await request('api/auth/immich-credential', {
+        const result = await request('/api/auth/immich-credential', {
           method: 'POST',
           body: JSON.stringify({ apiKey: $('credential-key').value }),
         });
         $('credential-key').value = '';
         setStatus($('credential-status'), `Connected as ${result.immichUserName || 'verified user'}.`);
+        if (currentProfile.role === 'parent') await loadProfiles();
       } catch (error) {
         setStatus($('credential-status'), error.message, true);
       } finally {
@@ -238,7 +245,7 @@
       const button = event.submitter;
       button.disabled = true;
       try {
-        await request('api/auth/passphrase', {
+        await request('/api/auth/passphrase', {
           method: 'POST',
           body: JSON.stringify({
             currentPassphrase: $('current-passphrase').value,
@@ -259,7 +266,7 @@
       const button = event.submitter;
       button.disabled = true;
       try {
-        const result = await request('api/auth/admin/profiles', {
+        const result = await request('/api/auth/admin/profiles', {
           method: 'POST',
           body: JSON.stringify({
             displayName: $('profile-name').value,
@@ -279,7 +286,7 @@
 
     (async () => {
       try {
-        currentProfile = await request('api/auth/me');
+        currentProfile = await request('/api/auth/me');
         $('credential-copy').textContent = currentProfile.immichConnected
           ? 'Replace the API key used by your PhotoDesk profile. The key is write-only and will not be shown again.'
           : 'Add the API key used by your PhotoDesk profile. The key is write-only and will not be shown again.';
@@ -293,6 +300,12 @@
         }
       }
     })();
+
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden && currentProfile?.role === 'parent') {
+        loadProfiles().catch(error => setStatus($('profile-status'), error.message, true));
+      }
+    });
   </script>
 </body>
 </html>

@@ -303,6 +303,26 @@ test('POST /api/auth/immich-credential verifies and saves the Immich key', async
 
 // ─── Admin profile management ────────────────────────────────
 
+test('admin profile listing reports enrolled Immich credentials', async () => {
+  const res = await authedFetch('/api/auth/admin/profiles', parentCookie);
+  assert.equal(res.status, 200);
+  const profiles = await res.json();
+  const parent = profiles.find(profile => profile.id === 1);
+  assert.deepEqual(parent, {
+    id: 1,
+    displayName: 'Parent A',
+    role: 'parent',
+    status: 'active',
+    immichConnected: true,
+    immichUserId: 'user-1',
+    immichVerifiedAt: parent.immichVerifiedAt,
+    createdAt: parent.createdAt,
+  });
+  assert.ok(parent.immichVerifiedAt);
+  assert.ok(parent.createdAt);
+  assert.equal('immich_api_key' in parent, false);
+});
+
 test('parent can create a new profile', async () => {
   const res = await authedFetch('/api/auth/admin/profiles', parentCookie, {
     method: 'POST',

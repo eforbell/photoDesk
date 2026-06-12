@@ -198,6 +198,15 @@
 - PR review fixed the legacy-session fallback import, added direct coverage for remote owner resolution, and parallelized transitional asset-info lookups. Immich's metadata search schema exposes no owner or partner-exclusion filter, so owned-library scoping must continue filtering response `ownerId` values client-side.
 ---
 
+## 2026-06-12 — Household Settings Reliability
+- Made every settings API request root-relative so authentication actions cannot resolve into a nested SPA route.
+- Replaced raw JSON parser failures with an actionable unexpected-response error when a stale server or proxy returns an HTML fallback.
+- Normalized the parent profile-list response into a public camelCase DTO and verified that enrolled Immich credentials report `immichConnected: true` without exposing keys.
+- Refreshed the parent profile list after credential enrollment and when returning to the settings tab, avoiding stale “needs Immich key” labels.
+- Added page-contract and API regressions, then browser-validated successful passphrase rotation and the “Immich connected” profile status.
+- **Learning:** A git-updated static page can be served by an older long-running Node process, so settings clients must reject non-JSON fallbacks clearly and deploys must restart the service after pulling route changes.
+---
+
 ## 2026-06-12 — Feature #5 PR Review Hardening
 - Reviewed the household-profile migration, authentication boundary, per-profile Immich credential threading, local derivative access, discovery state, and deploy path.
 - Removed the global API-key fallback for profiles without an enrolled credential and added regression coverage proving those profiles remain disconnected.

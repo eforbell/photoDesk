@@ -174,14 +174,23 @@ router.post('/immich-credential', requireAuth, async (req, res) => {
 
 router.get('/admin/profiles', requireParent, (req, res) => {
   const db = getDb();
-  const profiles = db.prepare(`
+  const rows = db.prepare(`
     SELECT id, display_name, role, status, immich_user_id, immich_verified_at, created_at,
            CASE WHEN immich_api_key IS NOT NULL THEN 1 ELSE 0 END AS immich_connected
     FROM profiles
     ORDER BY id
   `).all();
-  assertNoSecrets(profiles);
-  res.json(profiles);
+  assertNoSecrets(rows);
+  res.json(rows.map(profile => ({
+    id: profile.id,
+    displayName: profile.display_name,
+    role: profile.role,
+    status: profile.status,
+    immichConnected: Boolean(profile.immich_connected),
+    immichUserId: profile.immich_user_id || null,
+    immichVerifiedAt: profile.immich_verified_at || null,
+    createdAt: profile.created_at,
+  })));
 });
 
 router.post('/admin/profiles', requireParent, (req, res) => {
