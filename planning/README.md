@@ -22,7 +22,7 @@ Feature-driven development tracking for PhotoDesk, the photo review & light-edit
 | 3 | Editor (Crop + Adjustments + Presets) | shipped |
 | 4 | Commit Hardening + Edited Asset Upload | shipped |
 | 5 | Household Profiles + Scoped Immich Credentials | shipped |
-| 6 | Editor Interaction Upgrades | planned |
+| 6 | Editor Interaction Upgrades | ready for review |
 
 ## Design Reference
 

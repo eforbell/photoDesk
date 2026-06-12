@@ -132,6 +132,61 @@ test('edit API renders, serves, and removes a durable derivative', async () => {
   assert.equal(fs.existsSync(path.join(process.env.PHOTODESK_EDIT_DIR, edit.rendered_path)), false);
 });
 
+test('edit API persists Free and flipped portrait crop recipes without UI provenance', async () => {
+  const freeResponse = await authFetch(`${baseUrl}/api/edits`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      sessionId: 1,
+      assetId: 'asset-1',
+      adjustments: { contrast: 7, temp: 6 },
+      crop: { aspect: 'Free', x: 0.15, y: 0.1, width: 0.55, height: 0.8 },
+      profileId: 'film',
+      intensity: 60,
+    }),
+  });
+  assert.equal(freeResponse.status, 200);
+  const freeEdit = await freeResponse.json();
+  assert.deepEqual(freeEdit.crop, {
+    aspect: 'Free',
+    x: 0.15,
+    y: 0.1,
+    width: 0.55,
+    height: 0.8,
+  });
+  assert.equal(freeEdit.adjustments.contrast, 7);
+  assert.equal('profileId' in freeEdit, false);
+  assert.equal('intensity' in freeEdit, false);
+
+  const flippedResponse = await authFetch(`${baseUrl}/api/edits`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      sessionId: 1,
+      assetId: 'asset-1',
+      adjustments: { contrast: 7, temp: 6 },
+      crop: { aspect: '9:16', x: 0.2890625, y: 0, width: 0.421875, height: 1 },
+    }),
+  });
+  assert.equal(flippedResponse.status, 200);
+  const flippedEdit = await flippedResponse.json();
+  assert.equal(flippedEdit.crop.aspect, '9:16');
+  assert.equal(flippedEdit.crop.x, 0.2890625);
+  assert.equal(flippedEdit.crop.width, 0.421875);
+
+  const invalidResponse = await authFetch(`${baseUrl}/api/edits`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      sessionId: 1,
+      assetId: 'asset-1',
+      adjustments: {},
+      crop: { aspect: 'Free', x: 0.7, y: 0, width: 0.4, height: 1 },
+    }),
+  });
+  assert.equal(invalidResponse.status, 400);
+});
+
 test('validates session membership before entering the render lock', async () => {
   const missingSession = await authFetch(`${baseUrl}/api/edits`, {
     method: 'POST',

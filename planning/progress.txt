@@ -220,3 +220,23 @@
 - Added a Settings screen where parents can create, enable/disable, and reset household profiles; all users can rotate their Immich key and change their own passphrase.
 - Full suite after review hardening: 67 passing tests. Browser smoke coverage passed fresh setup and authenticated library rendering at desktop and 390×844.
 - **Queued:** full two-profile review/edit/commit browser testing against Immich.
+
+---
+
+## 2026-06-12 — Feature #6 Editor Interaction Upgrades
+- Replaced centered-only crop selection with normalized pointer/touch move and resize interactions, including locked corner ratios, Free edge handles, boundary clamping, and 44px minimum interaction geometry.
+- Added center-preserving aspect refits plus orientation Flip, including persisted `9:16` support as the portrait form of `16:9`.
+- Kept Crop source-faithful with a light resting surround, stronger active-drag dimming, rule-of-thirds grid, explicit normalized/pixel readout, and **Apply crop & adjust** transition.
+- Made Adjust render only the framed crop using crop-aware background geometry before applying the existing adjustment filter, temperature, and vignette composition.
+- Expanded the editor to fifteen grouped, current-photo profile previews and added 0–100% intensity scaling from immutable profile definitions.
+- Manual slider changes now retain the selected profile/intensity context while visibly marking the recipe **Custom**; only the eight adjustment values and normalized crop remain durable.
+- Added browser/server validation for `Free` and `9:16`, off-center landscape and portrait extraction, and cropping after EXIF auto-orientation.
+- Browser-validated edge resize, crop reposition, aspect flip, cropped Adjust framing, Film at 60%, Custom state, save/reopen, and the 390×844 stacked layout.
+- The real save path persisted the exact Free crop and scaled/custom adjustment recipe and rendered an 808×900 JPEG from the selected off-center region.
+- Visual verdict against `design/design_handoff_photodesk/Editor Lab.html`: 94/100.
+- Full automated suite: 79 passing tests.
+- **Learnings:**
+  - Crop and adjustment views need different image-stage semantics: Crop shows the complete source plus selection, while Adjust contains the selected output frame.
+  - Editing profile and intensity are useful transient provenance but would duplicate the durable adjustment recipe if stored.
+  - Supporting Flip requires validating the generated orientation (`9:16`), not only the aspect chips initially shown.
+  - Browser interaction is essential for crop tooling because pointer capture, mobile scrolling, sticky actions, and contain-fit geometry are not proven by pure crop math alone.

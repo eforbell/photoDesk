@@ -1,6 +1,6 @@
 {
   "currentFeature": "Feature #6: Editor Interaction Upgrades",
-  "status": "planned",
+  "status": "ready-for-review",
   "branch": "feature/6-editor-interaction-upgrades",
   "prdPath": "planning/features/feature-6-editor-interaction-upgrades.json",
   "testSpecPath": "planning/features/feature-6-editor-interaction-upgrades-test-spec.md",

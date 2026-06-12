@@ -342,11 +342,22 @@
         <div class="editor-stage">
           <div id="editor-image-frame" class="editor-image-frame">
             <img id="editor-image" alt="Edit preview" />
+            <div id="editor-cropped-image" class="editor-cropped-image hidden"></div>
             <div id="editor-temp-overlay" class="editor-image-overlay editor-temp-overlay"></div>
             <div id="editor-vignette-overlay" class="editor-image-overlay"></div>
-            <svg id="editor-thirds" class="editor-thirds hidden" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
-              <path d="M33.333 0V100M66.666 0V100M0 33.333H100M0 66.666H100"></path>
-            </svg>
+            <div id="editor-crop-window" class="editor-crop-window hidden">
+              <svg class="editor-thirds" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
+                <path d="M33.333 0V100M66.666 0V100M0 33.333H100M0 66.666H100"></path>
+              </svg>
+              <span class="editor-crop-handle corner nw" data-crop-handle="nw"></span>
+              <span class="editor-crop-handle corner ne" data-crop-handle="ne"></span>
+              <span class="editor-crop-handle corner sw" data-crop-handle="sw"></span>
+              <span class="editor-crop-handle corner se" data-crop-handle="se"></span>
+              <span class="editor-crop-handle edge n" data-crop-handle="n"></span>
+              <span class="editor-crop-handle edge e" data-crop-handle="e"></span>
+              <span class="editor-crop-handle edge s" data-crop-handle="s"></span>
+              <span class="editor-crop-handle edge w" data-crop-handle="w"></span>
+            </div>
           </div>
         </div>
       </div>

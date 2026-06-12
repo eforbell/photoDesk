@@ -2,7 +2,7 @@
   "featureName": "Editor Interaction Upgrades",
   "workingNumber": 6,
   "branchName": "feature/6-editor-interaction-upgrades",
-  "status": "planned",
+  "status": "ready-for-review",
   "priority": "P1",
   "summary": "Complete the light-editor interaction model with draggable and resizable off-center crops, crop-aware adjustment previews, and a grouped editing-profile gallery with live thumbnails and intensity. Preserve the existing non-destructive render, persistence, and Immich commit contracts.",
   "designReference": [
