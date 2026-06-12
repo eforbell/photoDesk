@@ -365,3 +365,35 @@ test('kid cannot access admin routes', async () => {
   const res = await authedFetch('/api/auth/admin/profiles', kidAdminCookie);
   assert.equal(res.status, 403);
 });
+
+test('profile can change its own passphrase and rotate its auth session', async () => {
+  const loginRes = await apiFetch('/api/auth/login', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ profileId: kidProfileId, passphrase: 'kidpass1' }),
+  });
+  const oldCookie = getCookie(loginRes);
+
+  const changeRes = await authedFetch('/api/auth/passphrase', oldCookie, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      currentPassphrase: 'kidpass1',
+      newPassphrase: 'kidpass-new',
+    }),
+  });
+  assert.equal(changeRes.status, 200);
+  const newCookie = getCookie(changeRes);
+  assert.ok(newCookie);
+  assert.notEqual(newCookie, oldCookie);
+
+  assert.equal((await authedFetch('/api/auth/me', oldCookie)).status, 401);
+  assert.equal((await authedFetch('/api/auth/me', newCookie)).status, 200);
+
+  const relogin = await apiFetch('/api/auth/login', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ profileId: kidProfileId, passphrase: 'kidpass-new' }),
+  });
+  assert.equal(relogin.status, 200);
+});

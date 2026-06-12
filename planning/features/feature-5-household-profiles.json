@@ -21,12 +21,10 @@
       "Seeded the untouched bootstrap profile from the existing environment key so single-user production upgrades retain their connection.",
       "Stopped the service and backed up SQLite before deployment migrations.",
       "Made the secrets guard active for profile query results and credential verification logs.",
-      "Prevented unauthenticated root requests from briefly bootstrapping the dashboard."
+      "Prevented unauthenticated root requests from briefly bootstrapping the dashboard.",
+      "Added a parent-facing household profile manager, existing-key rotation, and self-service passphrase changes."
     ],
     "queuedProductFollowUps": [
-      "Add the parent-facing household profile management UI; the API exists, but the current header menu only exposes sign out.",
-      "Add an authenticated personal settings path for rotating an existing Immich key.",
-      "Add a self-service passphrase change flow so parent-issued temporary passphrases do not remain permanent.",
       "Run extended two-profile browser testing through review, edit, and commit—not only login and library isolation."
     ]
   },

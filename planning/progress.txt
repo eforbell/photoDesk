@@ -208,5 +208,6 @@
 - Activated the secrets guard for profile query responses and per-profile credential verification logs.
 - Updated deployment to stop PhotoDesk and back up SQLite before running the table-rebuild migration.
 - Fixed unauthenticated `/` handling so the login page is served directly without a dashboard flash or avoidable 401 requests.
-- Full suite after review hardening: 65 passing tests. Browser smoke coverage passed fresh setup and authenticated library rendering at desktop and 390×844.
-- **Queued:** parent profile-management UI, existing-key rotation UI, self-service passphrase change, and full two-profile review/edit/commit browser testing.
+- Added a Settings screen where parents can create, enable/disable, and reset household profiles; all users can rotate their Immich key and change their own passphrase.
+- Full suite after review hardening: 67 passing tests. Browser smoke coverage passed fresh setup and authenticated library rendering at desktop and 390×844.
+- **Queued:** full two-profile review/edit/commit browser testing against Immich.

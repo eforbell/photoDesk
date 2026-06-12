@@ -35,7 +35,7 @@
   display: block; width: 100%; text-align: left;
   background: none; border: none; color: var(--text-dim);
   font: inherit; font-size: 13px; padding: 7px 10px;
-  border-radius: 4px; cursor: pointer;
+  border-radius: 4px; cursor: pointer; text-decoration: none;
 }
 .profile-menu-item:hover { background: var(--panel-3); color: var(--text); }
 
@@ -116,6 +116,7 @@
             <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 9l6 6 6-6"/></svg>
           </button>
           <div id="profile-menu" class="profile-menu hidden">
+            <a href="settings.html" class="profile-menu-item">Settings</a>
             <button id="btn-logout" class="profile-menu-item">Sign out</button>
           </div>
         </div>

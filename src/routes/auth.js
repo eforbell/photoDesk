@@ -17,6 +17,15 @@ const {
 const { invalidateLibraryCache } = require('../library');
 const { assertNoSecrets, sanitizeString } = require('../secrets-guard');
 
+function setSessionCookie(res, session) {
+  res.cookie(COOKIE_NAME, session.token, {
+    httpOnly: true,
+    sameSite: 'lax',
+    expires: new Date(session.expiresAt),
+    path: '/',
+  });
+}
+
 router.get('/profiles', (req, res) => {
   const db = getDb();
   const profiles = db.prepare(`
@@ -48,12 +57,7 @@ router.post('/login', (req, res) => {
     return res.status(401).json({ error: 'Invalid credentials' });
   }
   const session = createSession(db, profile.id);
-  res.cookie(COOKIE_NAME, session.token, {
-    httpOnly: true,
-    sameSite: 'lax',
-    expires: new Date(session.expiresAt),
-    path: '/',
-  });
+  setSessionCookie(res, session);
   res.json({ ok: true });
 });
 
@@ -87,12 +91,7 @@ router.post('/setup', (req, res) => {
     WHERE id = 1
   `).run(normalizedName, hash);
   const session = createSession(db, 1);
-  res.cookie(COOKIE_NAME, session.token, {
-    httpOnly: true,
-    sameSite: 'lax',
-    expires: new Date(session.expiresAt),
-    path: '/',
-  });
+  setSessionCookie(res, session);
   res.json({ ok: true, profileId: 1 });
 });
 
@@ -105,6 +104,32 @@ router.get('/me', requireAuth, (req, res) => {
     immichConnected: Boolean(profile.immich_api_key),
     immichUserId: profile.immich_user_id || null,
   });
+});
+
+router.post('/passphrase', requireAuth, (req, res) => {
+  const { currentPassphrase, newPassphrase } = req.body || {};
+  if (typeof currentPassphrase !== 'string' || typeof newPassphrase !== 'string') {
+    return res.status(400).json({ error: 'Current and new passphrases are required' });
+  }
+  if (newPassphrase.length < 4) {
+    return res.status(400).json({ error: 'New passphrase must be at least 4 characters' });
+  }
+  const db = getDb();
+  const profile = db.prepare(
+    'SELECT passphrase_hash FROM profiles WHERE id = ?'
+  ).get(req.profile.id);
+  if (!profile || !verifyPassphrase(currentPassphrase, profile.passphrase_hash)) {
+    return res.status(401).json({ error: 'Current passphrase is incorrect' });
+  }
+
+  const session = db.transaction(() => {
+    db.prepare('UPDATE profiles SET passphrase_hash = ? WHERE id = ?')
+      .run(hashPassphrase(newPassphrase), req.profile.id);
+    destroyProfileSessions(db, req.profile.id);
+    return createSession(db, req.profile.id);
+  })();
+  setSessionCookie(res, session);
+  res.json({ ok: true });
 });
 
 router.post('/immich-credential', requireAuth, async (req, res) => {
@@ -150,7 +175,8 @@ router.post('/immich-credential', requireAuth, async (req, res) => {
 router.get('/admin/profiles', requireParent, (req, res) => {
   const db = getDb();
   const profiles = db.prepare(`
-    SELECT id, display_name, role, status, immich_user_id, immich_verified_at, created_at
+    SELECT id, display_name, role, status, immich_user_id, immich_verified_at, created_at,
+           CASE WHEN immich_api_key IS NOT NULL THEN 1 ELSE 0 END AS immich_connected
     FROM profiles
     ORDER BY id
   `).all();
