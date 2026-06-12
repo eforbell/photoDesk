@@ -38,25 +38,29 @@ test('computes exact processed and untriaged counts from current assets', () => 
   assert.equal(snapshot.days[0].untriagedCount, 1);
 });
 
-test('treats previously uploaded edited assets as processed during discovery', () => {
+test('returns committed and uploaded edit IDs scoped to the given profile', () => {
   const db = {
     prepare(sql) {
       if (sql.includes('FROM processed_assets')) {
-        return { all: () => [{ asset_id: 'original' }] };
-      }
-      if (sql.includes('FROM edits')) {
-        return { all: () => [
-          { immich_asset_id: 'edited-version' },
-          { immich_asset_id: 'edited-version' },
-        ] };
+        return {
+          all: (processedProfileId, editProfileId) => {
+            assert.equal(processedProfileId, 7);
+            assert.equal(editProfileId, 7);
+            return [
+              { asset_id: 'original' },
+              { asset_id: 'batch-2' },
+              { asset_id: 'uploaded-edit' },
+            ];
+          },
+        };
       }
       throw new Error(`Unexpected SQL: ${sql}`);
     },
   };
 
   assert.deepEqual(
-    [...processedAssetIds(db)].sort(),
-    ['edited-version', 'original']
+    [...processedAssetIds(db, 7)].sort(),
+    ['batch-2', 'original', 'uploaded-edit']
   );
 });
 

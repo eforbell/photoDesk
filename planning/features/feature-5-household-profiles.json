@@ -1,8 +1,8 @@
 {
   "featureName": "Household Profiles and Scoped Immich Credentials",
   "workingNumber": 5,
-  "status": "backlog-discovery",
-  "scheduled": false,
+  "status": "in-review",
+  "scheduled": true,
   "priority": "P1",
   "summary": "Permit each family member to use PhotoDesk through an authenticated household profile backed by that person's own user-scoped Immich API key. Review sessions, reviewed state, edits, and caches remain private to the profile even when Immich partner sharing makes household photos visible in a combined timeline.",
   "fieldLearning": {
@@ -11,20 +11,51 @@
     "mvpMitigation": "Single-user PhotoDesk discovery now filters search results to AssetResponseDto.ownerId matching GET /api/users/me. New sessions persist ownerId, old unscoped discovery caches are invalidated, and legacy mixed-owner sessions are rejected before commit performs any Immich mutation.",
     "futureImplication": "Partner timeline support must remain an explicit, ownership-labeled, capability-aware scope. It cannot reuse the owned-library commit model."
   },
+  "pr5Review": {
+    "date": "2026-06-12",
+    "fixedBeforeMerge": [
+      "Removed the server-wide Immich API key fallback from profile requests.",
+      "Added profile ownership enforcement to rendered edit downloads.",
+      "Restored uploaded edit IDs to profile-scoped processed discovery.",
+      "Corrected ISO auth-session expiry comparisons.",
+      "Seeded the untouched bootstrap profile from the existing environment key so single-user production upgrades retain their connection.",
+      "Stopped the service and backed up SQLite before deployment migrations.",
+      "Made the secrets guard active for profile query results and credential verification logs.",
+      "Prevented unauthenticated root requests from briefly bootstrapping the dashboard.",
+      "Added a parent-facing household profile manager, existing-key rotation, and self-service passphrase changes."
+    ],
+    "queuedProductFollowUps": [
+      "Run extended two-profile browser testing through review, edit, and commit—not only login and library isolation."
+    ]
+  },
   "productIntent": [
     "The household can share photos through Immich without forcing everyone to operate as the Immich administrator.",
     "Each person gets an independent PhotoDesk workspace and can review the same shared photo independently.",
     "Immich remains the authority for asset visibility and mutation permissions; PhotoDesk does not invent broader access.",
     "Parents can provision, disable, and recover household profiles without gaining routine access to another person's plaintext API key."
   ],
-  "recommendedDirection": {
-    "identity": "Use a PhotoDesk household profile and secure server-side session. Reuse the member/passphrase and parent/member role concepts already established in FamilyPulse and HomeSource unless the homeApps suite adopts a shared OIDC or trusted reverse-proxy identity layer first.",
-    "immichCredential": "Map exactly one active Immich API key to each PhotoDesk profile. Validate it with Immich's current-user and current-key endpoints, record the Immich user ID and granted permissions, encrypt the secret at rest, and never return it to the browser after enrollment.",
-    "authorizationBoundary": "Resolve the active PhotoDesk profile from its authenticated server session, then construct the Immich client from that profile's stored credential. Never accept a profile ID, Immich user ID, or credential selector from a normal API request.",
-    "reviewIsolation": "Sessions and reviewed state are private per profile by default. The same Immich asset can therefore be reviewed by multiple family members without one person's commit removing it from another person's unreviewed queue.",
-    "sharedTimeline": "Owned assets are the safest initial scope. Partner assets can be added as an opt-in read/discovery scope once ownership and endpoint capabilities are surfaced. A visible shared asset is not assumed to support rating, trash, stacking, editing, or derivative upload operations.",
-    "administration": "A household admin can create or disable PhotoDesk profiles, inspect connection health and permission status, and request credential rotation. Plaintext API keys are write-only secrets."
+
+  "resolvedDecisions": {
+    "identityProvider": {
+      "decision": "Port the familyPulse passphrase/session pattern to SQLite",
+      "details": "scrypt hash via node:crypto (salt:hash format), UUID session token, HttpOnly cookie named pd_session, 30-day TTL. Middleware resolves req.profile from cookie on every request. No external auth deps.",
+      "reference": "familyPulse/lib/auth.js — hashPassphrase, verifyPassphrase, createSession, validateSession, requireAuth, requireParent"
+    },
+    "credentialStorage": {
+      "decision": "Store Immich API key plaintext in the profiles table, guarded by a secrets-guard module",
+      "details": "Same approach as familyPulse stores Plaid access tokens. The key is written once during enrollment, never returned in API responses, and redacted from logs by a secrets-guard module (pattern: familyPulse/lib/secrets-guard.js). The DB file lives on the LAN server alongside the .env that would hold any encryption key, so encryption at rest adds marginal value for this deployment. If a future deployment needs at-rest encryption, add it as a follow-up without changing the API surface.",
+      "redactedFields": ["immich_api_key", "passphrase_hash", "session_token"]
+    },
+    "defaultLibraryScope": {
+      "decision": "Default to the active user's owned library",
+      "details": "Partner timeline inclusion is deferred to slice 3. Owned-only scope is already enforced by PR #4 and carries forward per-profile."
+    },
+    "childAdministration": {
+      "decision": "Parents can create, disable, and reset profile passphrases. Kids manage their own Immich key enrollment after parent creates the profile.",
+      "details": "Parents see all profiles in settings but cannot view another profile's sessions, decisions, or Immich key. Disabling a profile expires its session immediately. Passphrase reset by parent sets a temporary passphrase the kid changes on next login."
+    }
   },
+
   "rejectedDirections": [
     {
       "option": "One Immich administrator API key with a user picker in PhotoDesk",
@@ -35,6 +66,10 @@
       "reason": "This exposes durable Immich credentials to browser storage, XSS, extensions, screenshots, and client logs."
     },
     {
+      "option": "Encrypt API keys at rest with a master key",
+      "reason": "Over-engineered for a LAN family app. The DB file sits on the same server as the .env that would hold the encryption key. The secrets-guard pattern (never return keys in API responses, redact from logs) provides the meaningful protection layer."
+    },
+    {
       "option": "Use Immich account passwords as PhotoDesk credentials",
       "reason": "PhotoDesk should not collect or retain Immich passwords. User-created API keys provide revocation and granular permission controls."
     },
@@ -43,73 +78,223 @@
       "reason": "The stated use case requires each person to have their own sessions. Household-shared review state could be a later explicit collaboration mode, not the default."
     }
   ],
+
   "currentSingleUserAssumptions": [
     {
       "area": "Configuration",
       "evidence": "src/config.js:4-9",
-      "impact": "One process-wide IMMICH_API_KEY and IMMICH_URL are used for every request."
+      "impact": "One process-wide IMMICH_API_KEY and IMMICH_URL are used for every request.",
+      "resolution": "Config retains IMMICH_URL (server-wide). IMMICH_API_KEY becomes the bootstrap key for the migration profile only; after migration, per-profile keys are read from the DB."
     },
     {
       "area": "Immich client",
       "evidence": "src/immich-client.js:3-12",
-      "impact": "Authentication headers are built from the global configuration rather than request/profile context."
+      "impact": "Authentication headers are built from the global configuration rather than request/profile context.",
+      "resolution": "Immich client functions accept an apiKey parameter or a profile context object. The global config fallback is removed after migration."
     },
     {
       "area": "Sessions",
       "evidence": "db/schema.sql:10-22",
-      "impact": "Sessions have no owner/profile foreign key."
+      "impact": "Sessions have no owner/profile foreign key.",
+      "resolution": "Add profile_id NOT NULL to sessions table. Migration backfills existing sessions to the bootstrap admin profile."
     },
     {
       "area": "Reviewed state",
       "evidence": "db/schema.sql:56-60",
-      "impact": "processed_assets uses asset_id as a global primary key, so one person's commit currently marks the asset reviewed for everyone."
+      "impact": "processed_assets uses asset_id as a global primary key, so one person's commit currently marks the asset reviewed for everyone.",
+      "resolution": "Rebuild table with UNIQUE(profile_id, asset_id) replacing the asset_id PRIMARY KEY. See migrationPlan."
     },
     {
       "area": "Discovery cache",
       "evidence": "db/schema.sql:62-66 and src/library.js:169-204",
-      "impact": "There is one cached library snapshot and one global processed-asset set."
+      "impact": "There is one cached library snapshot and one global processed-asset set.",
+      "resolution": "Change density_cache PK from CHECK(id=1) singleton to UNIQUE(profile_id). Each profile gets its own snapshot with its own Immich key's view."
     }
   ],
-  "proposedDataModel": {
-    "profiles": [
-      "id INTEGER PRIMARY KEY",
-      "display_name TEXT NOT NULL",
-      "role TEXT NOT NULL CHECK(role IN ('household_admin', 'member'))",
-      "auth_subject TEXT or passphrase_hash TEXT, depending on the selected identity approach",
-      "status TEXT NOT NULL CHECK(status IN ('active', 'disabled'))",
-      "created_at TEXT NOT NULL"
-    ],
-    "profile_sessions": [
-      "Opaque random session token stored as a hash",
-      "profile_id foreign key",
-      "expires_at and last_seen_at",
-      "HttpOnly, Secure in production, SameSite cookie"
-    ],
-    "immich_credentials": [
-      "profile_id UNIQUE foreign key",
-      "immich_user_id TEXT NOT NULL",
-      "encrypted_api_key BLOB/TEXT NOT NULL",
-      "key_fingerprint TEXT NOT NULL for support and rotation without revealing the key",
-      "permissions TEXT NOT NULL as the last verified JSON snapshot",
-      "verified_at, rotated_at, and revoked_at timestamps"
-    ],
+
+  "dataModel": {
+    "profiles": {
+      "columns": [
+        "id INTEGER PRIMARY KEY AUTOINCREMENT",
+        "display_name TEXT NOT NULL UNIQUE",
+        "role TEXT NOT NULL CHECK(role IN ('parent', 'kid')) DEFAULT 'kid'",
+        "passphrase_hash TEXT",
+        "immich_url TEXT NOT NULL DEFAULT '' -- inherits server-wide IMMICH_URL if empty",
+        "immich_api_key TEXT -- plaintext, never returned in API responses",
+        "immich_user_id TEXT -- cached from GET /api/users/me after enrollment",
+        "immich_verified_at TEXT -- last successful credential check",
+        "status TEXT NOT NULL CHECK(status IN ('active', 'disabled', 'setup')) DEFAULT 'setup'",
+        "created_at TEXT NOT NULL DEFAULT (datetime('now'))"
+      ],
+      "notes": "A profile in 'setup' status has been created by a parent but has no Immich key enrolled yet. The kid logs in and enrolls their own key."
+    },
+    "auth_sessions": {
+      "columns": [
+        "id INTEGER PRIMARY KEY AUTOINCREMENT",
+        "token TEXT NOT NULL UNIQUE",
+        "profile_id INTEGER NOT NULL REFERENCES profiles(id) ON DELETE CASCADE",
+        "expires_at TEXT NOT NULL",
+        "created_at TEXT NOT NULL DEFAULT (datetime('now'))"
+      ],
+      "notes": "Named auth_sessions to avoid collision with the existing review sessions table. Cookie: pd_session, HttpOnly, 30-day TTL."
+    },
     "ownershipChanges": [
-      "Add profile_id NOT NULL to sessions.",
-      "Change processed_assets identity from asset_id to UNIQUE(profile_id, asset_id), retaining session_id for provenance.",
-      "Partition density_cache by profile_id and library_scope instead of the singleton id=1 row.",
-      "Derive decisions, ratings, stacks, and edits through their owning session; direct profile_id columns are unnecessary unless profiling later proves joins costly.",
-      "Record library_scope on sessions and cached snapshots, initially 'owned' and later optionally 'owned_and_partners'."
-    ],
-    "migration": "Create one household_admin profile for the existing installation, attach all existing sessions and reviewed state to it, move the current environment API key into the credential enrollment path, and preserve all current data. The migration must be transactional and represented in db/migrations plus db/schema.sql."
+      "sessions: ADD COLUMN profile_id INTEGER NOT NULL REFERENCES profiles(id) DEFAULT 1 — backfill all existing rows to bootstrap admin profile (id=1)",
+      "processed_assets: rebuild table — new schema is (asset_id TEXT NOT NULL, profile_id INTEGER NOT NULL REFERENCES profiles(id), session_id INTEGER NOT NULL REFERENCES sessions(id), committed_at TEXT NOT NULL DEFAULT (datetime('now')), UNIQUE(profile_id, asset_id)). Copy existing rows with profile_id=1.",
+      "density_cache: change from CHECK(id=1) singleton to profile_id INTEGER NOT NULL UNIQUE REFERENCES profiles(id). Existing row gets profile_id=1.",
+      "Decisions, ratings, stacks, edits, commit_actions, commit_runs derive profile through their session's profile_id — no direct profile_id column needed."
+    ]
   },
-  "credentialSecurity": [
-    "Require a PhotoDesk master encryption key from deployment secrets; fail closed rather than storing new Immich keys unencrypted.",
-    "Use authenticated encryption with a unique nonce per credential and bind ciphertext to the profile ID as additional authenticated data.",
-    "Redact x-api-key, session cookies, encrypted values, and submitted credentials from request and error logs.",
-    "Display only the key name/fingerprint, Immich account identity, granted capabilities, and last verification time after enrollment.",
-    "Allow credential replacement and profile disablement without affecting other profiles.",
-    "Use least-privilege Immich keys. The exact permission template must be generated from the endpoints PhotoDesk actually uses and updated as features change."
+
+  "migrationPlan": {
+    "name": "005-household-profiles.sql",
+    "strategy": "Single transactional migration that creates new tables and adapts existing ones",
+    "steps": [
+      "CREATE TABLE profiles with columns above",
+      "INSERT bootstrap admin profile (id=1) using display_name from env or 'Admin', role='parent', status='active', immich_api_key from current config, immich_url from current config",
+      "CREATE TABLE auth_sessions",
+      "ALTER TABLE sessions ADD COLUMN profile_id INTEGER NOT NULL DEFAULT 1 REFERENCES profiles(id)",
+      "Rebuild processed_assets: CREATE processed_assets_new → INSERT INTO ... SELECT asset_id, 1 as profile_id, session_id, committed_at FROM processed_assets → DROP processed_assets → ALTER TABLE processed_assets_new RENAME TO processed_assets → recreate indexes",
+      "Rebuild density_cache: CREATE density_cache_new(profile_id INTEGER NOT NULL UNIQUE REFERENCES profiles(id), computed_at TEXT NOT NULL, data TEXT NOT NULL) → migrate existing row with profile_id=1 → drop and rename",
+      "CREATE secrets-guard index: CREATE INDEX idx_auth_sessions_token ON auth_sessions(token)"
+    ],
+    "rollbackNotes": "SQLite does not support transactional DDL for all operations. The migration runner should back up the DB file before applying. If interrupted, restore from backup."
+  },
+
+  "secretsGuard": {
+    "module": "src/secrets-guard.js",
+    "pattern": "Port from familyPulse/lib/secrets-guard.js, adapted for PhotoDesk",
+    "redactedFields": ["immich_api_key", "passphrase_hash", "token"],
+    "usage": "Call assertNoSecrets(rows) before sending any DB query results to API responses. Wrap error messages with sanitizeString() before logging."
+  },
+
+  "immichClientChanges": {
+    "approach": "Add a profileContext parameter to all Immich client functions",
+    "details": [
+      "Each exported function gains an optional first parameter: { apiKey, immichUrl }",
+      "If omitted, falls back to config (preserves backward compat during migration, removed after)",
+      "authHeaders() becomes authHeaders(apiKey) — no longer reads global config",
+      "The Express middleware resolves the profile, attaches req.profile with the decrypted key, and downstream route handlers pass it to Immich client calls"
+    ]
+  },
+
+  "ui": {
+    "loginScreen": {
+      "route": "GET / when no valid pd_session cookie",
+      "design": "Centered card on --bg-deep background. PhotoDesk wordmark + icon at top. List of active profile names as clickable buttons (like a user picker). Clicking a name shows a passphrase input field and a Login button. No profile creation from the login screen — parents do that in settings.",
+      "styling": "Reuse existing design tokens, .btn, .btn-primary, .btn-ghost classes. Hanken Grotesk font. Passphrase input uses the same input styling as the session name input.",
+      "mobile": "The card should be full-width on small viewports with comfortable touch targets."
+    },
+    "profileIndicator": {
+      "location": "Header bar, next to the existing Immich connection pill",
+      "design": "Display name + avatar emoji in a pill. Clicking opens a small dropdown with 'Switch profile' and 'Log out'. Same styling as connection-pill.",
+      "behavior": "Switch profile logs out the current session and returns to the login screen."
+    },
+    "adminSettings": {
+      "location": "New section in a Settings screen (gear icon in header, visible to parent role only)",
+      "capabilities": [
+        "List all profiles with status, Immich connection health, and last active time",
+        "Create new profile (display name, role, temporary passphrase)",
+        "Disable/enable a profile",
+        "Reset a profile's passphrase"
+      ],
+      "notIncluded": "No ability to view another profile's sessions, decisions, or Immich key"
+    },
+    "credentialEnrollment": {
+      "location": "Shown automatically when a 'setup' status profile logs in, or accessible from a personal settings area",
+      "flow": "Paste Immich API key → PhotoDesk calls GET /api/users/me with it to verify → shows Immich username for confirmation → saves key and immich_user_id on confirm",
+      "guidance": "Include a short help text explaining where to find the API key in Immich (Administration → API Keys)"
+    }
+  },
+
+  "deliverySlices": [
+    {
+      "slice": 0,
+      "name": "Compatibility and threat-model spike",
+      "outcome": "Document the deployed Immich version, required API-key permission set, current-user/key verification calls, partner timeline retrieval, asset ownership fields, and mutation behavior for partner-owned assets.",
+      "status": "largely-complete",
+      "notes": "PR #4 already validated ownership filtering, getCurrentUser(), and the mutation boundary. Remaining work: document the minimum Immich API key permission set PhotoDesk requires, and verify getMyApiKey endpoint returns granted permissions.",
+      "exitCriteria": [
+        "Every PhotoDesk Immich endpoint is mapped to its required API-key permission",
+        "Minimum permission template documented for user-facing key creation guidance",
+        "Owned versus partner-owned write behavior tested (done in PR #4)"
+      ]
+    },
+    {
+      "slice": 1,
+      "name": "Profiles, auth, credential enrollment, and migration",
+      "outcome": "Add profile login/session management, secrets-guard module, per-profile Immich credential enrollment, admin profile management, and the single-user migration.",
+      "scopeLimit": "Owned Immich library only. Existing single-user PhotoDesk workflows remain unchanged after migration. The only new UI is the login screen, profile indicator, admin settings, and credential enrollment.",
+      "exitCriteria": [
+        "Migration 005 creates profiles/auth_sessions tables, backfills existing data to a bootstrap admin profile, and rebuilds processed_assets and density_cache with profile_id",
+        "Migration is tested fresh, on existing single-user DB, and idempotent rerun",
+        "Login screen lists active profiles, accepts passphrase, sets pd_session cookie",
+        "All existing API routes require auth and resolve req.profile from session",
+        "Immich client functions accept per-profile credentials instead of global config",
+        "Credential enrollment verifies key against Immich and persists immich_user_id",
+        "secrets-guard module redacts API keys and passphrases from responses and logs",
+        "Parent can create/disable profiles and reset passphrases from admin settings",
+        "Disabling a profile immediately expires its auth session",
+        "Automated tests cover: two-profile isolation, login/logout, credential enrollment, disabled profile rejection, secrets-guard redaction",
+        "Browser tests cover: login flow, profile switching, admin CRUD, credential enrollment, mobile login"
+      ]
+    },
+    {
+      "slice": 2,
+      "name": "Per-profile PhotoDesk state isolation",
+      "outcome": "Partition sessions, reviewed assets, discovery snapshots, recent sessions, edits, and commits by profile.",
+      "scopeLimit": "No shared PhotoDesk collaboration state.",
+      "exitCriteria": [
+        "Creating a session records the active profile_id",
+        "Library discovery and density cache are keyed by profile_id",
+        "processed_assets uses UNIQUE(profile_id, asset_id) — one profile's commit does not mark assets reviewed for other profiles",
+        "Session list, recent sessions, and all session-scoped API routes are filtered to the active profile",
+        "Automated tests prove: Profile A commits an asset, Profile B still sees it as unreviewed. Profile A's sessions are invisible to Profile B's API requests.",
+        "Browser test: two profiles each see independent library stats and session lists"
+      ]
+    },
+    {
+      "slice": 3,
+      "name": "Partner timeline discovery",
+      "outcome": "Offer an explicit per-profile owned/partner timeline scope, show ownership badges, and keep unsupported mutations disabled.",
+      "scopeLimit": "Read/discovery first; commit support is capability-gated.",
+      "exitCriteria": [
+        "Profile settings include a library scope toggle (owned-only vs owned+partners)",
+        "Partner assets are visually distinguished in grid, lightbox, and summary with an ownership badge",
+        "Commit preview disables and explains unsupported actions for partner-owned assets",
+        "Discovery cache is keyed by profile_id + library_scope",
+        "Automated tests cover: partner asset visibility with badge, commit rejection for partner assets, scope toggle cache invalidation"
+      ]
+    },
+    {
+      "slice": 4,
+      "name": "Capability-aware shared workflows",
+      "outcome": "Enable only the partner/shared-asset operations proven safe and supported by Immich, with clear commit previews and audit records.",
+      "scopeLimit": "Do not broaden permissions through an administrator credential.",
+      "exitCriteria": [
+        "Each commit action type (trash, rate, stack, edit upload) is individually gated by asset ownership and API key permissions",
+        "Commit preview shows per-asset capability breakdown with clear explanations for disabled actions",
+        "Automated tests cover: mixed owned/partner session with selective commit",
+        "Browser test: commit preview accurately reflects which actions are allowed per asset"
+      ]
+    }
   ],
+
+  "acceptanceCriteria": [
+    "Profile A cannot list, retrieve, mutate, or infer Profile B's PhotoDesk sessions, decisions, ratings, edits, caches, or credentials.",
+    "The same Immich asset can be reviewed independently by two profiles and remains unreviewed for Profile B after Profile A commits it.",
+    "No normal browser request can choose another profile's Immich credential through a path, query, header, or request body value.",
+    "API keys are never returned after enrollment and are redacted from logs and error messages.",
+    "PhotoDesk verifies and records the Immich user identity associated with each submitted key.",
+    "A disabled profile immediately loses PhotoDesk access without disrupting other household members.",
+    "Discovery and density caches are isolated by profile and selected library scope.",
+    "Shared partner assets are visibly distinguished from owned assets before review and commit.",
+    "Unsupported writes to partner-owned assets are prevented and explained before commit.",
+    "The existing single-user database migrates to one household administrator profile without losing sessions, reviewed state, edits, or commit history.",
+    "Automated tests cover two profiles with overlapping visible asset IDs and prove state isolation.",
+    "Browser tests cover profile switching, session isolation, credential enrollment, and mobile login."
+  ],
+
   "libraryAndCommitRules": [
     "The active profile's Immich key determines the assets visible to PhotoDesk.",
     "Owned-library discovery and review should ship before partner-aware writes.",
@@ -119,78 +304,7 @@
     "Rendered derivatives upload into the active Immich user's account. Do not stack a derivative with a partner-owned original until that behavior is verified against the deployed Immich version and product semantics are approved.",
     "Cache keys and background refresh jobs must include profile_id and library_scope."
   ],
-  "deliverySlices": [
-    {
-      "slice": 0,
-      "name": "Compatibility and threat-model spike",
-      "outcome": "Document the deployed Immich version, required API-key permission set, current-user/key verification calls, partner timeline retrieval, asset ownership fields, and mutation behavior for partner-owned assets.",
-      "exitCriteria": [
-        "Two disposable Immich users and partner sharing are represented in integration fixtures or a reproducible local test setup.",
-        "Every PhotoDesk Immich endpoint is mapped to its required API-key permission.",
-        "Owned versus partner-owned write behavior is tested rather than inferred."
-      ]
-    },
-    {
-      "slice": 1,
-      "name": "Authenticated household profiles",
-      "outcome": "Add profile login/session management, parent/admin provisioning, encrypted per-profile credentials, and a migration of the existing installation to one admin profile.",
-      "scopeLimit": "Owned Immich library only; existing PhotoDesk workflows otherwise remain unchanged."
-    },
-    {
-      "slice": 2,
-      "name": "Per-profile PhotoDesk state",
-      "outcome": "Partition sessions, reviewed assets, discovery snapshots, recent sessions, edits, and commits by profile.",
-      "scopeLimit": "No shared PhotoDesk collaboration state."
-    },
-    {
-      "slice": 3,
-      "name": "Partner timeline discovery",
-      "outcome": "Offer an explicit per-profile owned/partner timeline scope, show ownership badges, and keep unsupported mutations disabled.",
-      "scopeLimit": "Read/discovery first; commit support is capability-gated."
-    },
-    {
-      "slice": 4,
-      "name": "Capability-aware shared workflows",
-      "outcome": "Enable only the partner/shared-asset operations proven safe and supported by Immich, with clear commit previews and audit records.",
-      "scopeLimit": "Do not broaden permissions through an administrator credential."
-    }
-  ],
-  "acceptanceCriteria": [
-    "Profile A cannot list, retrieve, mutate, or infer Profile B's PhotoDesk sessions, decisions, ratings, edits, caches, or credentials.",
-    "The same Immich asset can be reviewed independently by two profiles and remains unreviewed for Profile B after Profile A commits it.",
-    "No normal browser request can choose another profile's Immich credential through a path, query, header, or request body value.",
-    "API keys are encrypted at rest, redacted from logs, never returned after enrollment, and independently replaceable or revocable.",
-    "PhotoDesk verifies and records the Immich user identity and permissions associated with each submitted key.",
-    "A disabled profile immediately loses PhotoDesk access without disrupting other household members.",
-    "Discovery and density caches are isolated by profile and selected library scope.",
-    "Shared partner assets are visibly distinguished from owned assets before review and commit.",
-    "Unsupported writes to partner-owned assets are prevented and explained before commit.",
-    "The existing single-user database migrates to one household administrator profile without losing sessions, reviewed state, edits, or commit history.",
-    "Automated tests cover two profiles with overlapping visible asset IDs and prove state isolation.",
-    "Browser tests cover profile switching, session isolation, credential rotation failure, and mobile login/session behavior."
-  ],
-  "openDecisions": [
-    {
-      "decision": "PhotoDesk identity provider",
-      "recommendation": "Start with the existing homeApps household member/passphrase pattern if this feature arrives before shared suite authentication. Prefer shared OIDC/reverse-proxy identity if the suite adopts it first.",
-      "whyOpen": "This affects all homeApps and should not be decided accidentally inside PhotoDesk."
-    },
-    {
-      "decision": "Default library scope",
-      "recommendation": "Default to the active user's owned library; make partner timeline inclusion explicit.",
-      "whyOpen": "The household wants a shared timeline, but shared visibility and safe commit rights are different concepts."
-    },
-    {
-      "decision": "Child administration and recovery",
-      "recommendation": "Household admins may disable/reset a PhotoDesk profile, but API-key enrollment should still use the child's own Immich key and show who owns it.",
-      "whyOpen": "The desired balance between parental administration and private review history has not been specified."
-    },
-    {
-      "decision": "Future collaborative review state",
-      "recommendation": "Keep private review state as the invariant. Consider a separate named household queue only after individual workflows are proven.",
-      "whyOpen": "A shared queue could be useful for the administrator's large library but would change the meaning of 'reviewed'."
-    }
-  ],
+
   "researchReferences": [
     {
       "title": "Immich API authentication",
@@ -223,9 +337,14 @@
       "finding": "Timeline retrieval exposes a withPartners option suitable for a future partner-aware discovery spike."
     },
     {
-      "title": "Immich OAuth configuration",
-      "url": "https://docs.immich.app/administration/oauth/",
-      "finding": "Immich acts as an OIDC client to an external identity provider. A suite-wide identity provider could authenticate both Immich and PhotoDesk, but Immich itself should not be assumed to be PhotoDesk's OAuth provider."
+      "title": "FamilyPulse auth pattern",
+      "url": "file:///path/to/familyPulse/lib/auth.js",
+      "finding": "Suite-standard passphrase auth: scrypt hash (salt:hash), UUID session token, 30-day cookie, requireAuth/requireParent middleware. Adapt for SQLite."
+    },
+    {
+      "title": "FamilyPulse secrets guard",
+      "url": "file:///path/to/familyPulse/lib/secrets-guard.js",
+      "finding": "Suite-standard secret redaction: pattern-based sanitization, field-level redaction, assertNoSecrets guard for query results."
     }
   ]
 }

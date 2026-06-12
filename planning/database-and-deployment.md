@@ -30,8 +30,10 @@ Existing pre-migration dev databases are accepted only if they match the Feature
 1. fetch the requested ref from git
 2. update the deploy work tree
 3. install production dependencies with `npm ci --omit=dev`
-4. run `npm run migrate`
-5. restart the systemd service
+4. stop the running service
+5. back up the SQLite database
+6. run `npm run migrate`
+7. restart the systemd service
 
 Default production path and service name:
 
@@ -45,6 +47,11 @@ Override either when needed:
 ```bash
 APP_DIR=/opt/sovereign-home/apps/photoDesk SERVICE_NAME=photodesk ./deploy/deploy.sh origin/main
 ```
+
+Database backups default to a `backups/` directory beside the configured
+`PHOTODESK_DB_PATH`. Override the destination with `PHOTODESK_BACKUP_DIR`.
+If migration fails, the backup is retained and the previously running service
+remains stopped rather than starting against an uncertain schema.
 
 A starter unit lives at `deploy/photodesk.service`. Edit `User=`, paths, and `.env` location before installing it to `/etc/systemd/system/photodesk.service`.
 

@@ -51,6 +51,27 @@ const { getDb } = require('../src/db');
 
 let server;
 let baseUrl;
+let authToken;
+
+function authenticateProfile() {
+  const db = getDb();
+  db.prepare(`
+    UPDATE profiles
+    SET immich_api_key = 'test-key',
+        immich_user_id = 'user-1',
+        immich_verified_at = datetime('now'),
+        status = 'active',
+        passphrase_hash = 'not-used'
+    WHERE id = 1
+  `).run();
+  const crypto = require('crypto');
+  const token = crypto.randomUUID();
+  const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
+  db.prepare(
+    'INSERT INTO auth_sessions (token, profile_id, expires_at) VALUES (?, 1, ?)'
+  ).run(token, expiresAt);
+  return token;
+}
 
 test.before(async () => {
   await new Promise(resolve => {
@@ -59,6 +80,7 @@ test.before(async () => {
       resolve();
     });
   });
+  authToken = authenticateProfile();
 });
 
 test.after(async () => {
@@ -74,7 +96,7 @@ test.beforeEach(() => {
 test('new sessions include only assets owned by the connected Immich user', async () => {
   const response = await nativeFetch(`${baseUrl}/api/sessions`, {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: { 'content-type': 'application/json', 'cookie': `pd_session=${authToken}` },
     body: JSON.stringify({
       name: 'Owned photos only',
       dateFrom: '2026-06-10',
@@ -97,9 +119,9 @@ test('new sessions include only assets owned by the connected Immich user', asyn
 test('library discovery excludes partner assets and invalidates old unscoped cache data', async () => {
   const db = getDb();
   db.prepare(`
-    INSERT INTO density_cache (id, computed_at, data)
+    INSERT INTO density_cache (profile_id, computed_at, data)
     VALUES (1, datetime('now'), ?)
-    ON CONFLICT(id) DO UPDATE SET computed_at = excluded.computed_at, data = excluded.data
+    ON CONFLICT(profile_id) DO UPDATE SET computed_at = excluded.computed_at, data = excluded.data
   `).run(JSON.stringify({
     computedAt: new Date().toISOString(),
     totalLibrary: 99,
@@ -109,14 +131,16 @@ test('library discovery excludes partner assets and invalidates old unscoped cac
     days: [],
   }));
 
-  const response = await nativeFetch(`${baseUrl}/api/stats`);
+  const response = await nativeFetch(`${baseUrl}/api/stats`, {
+    headers: { 'cookie': `pd_session=${authToken}` },
+  });
   assert.equal(response.status, 200);
   const stats = await response.json();
   assert.equal(stats.totalLibrary, 1);
   assert.equal(stats.totalUntriaged, 1);
 
   const cached = JSON.parse(
-    db.prepare('SELECT data FROM density_cache WHERE id = 1').get().data
+    db.prepare('SELECT data FROM density_cache WHERE profile_id = 1').get().data
   );
   assert.equal(cached.libraryScope, 'owned');
   assert.equal(cached.totalLibrary, 1);

@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>PhotoDesk — Settings</title>
+  <link rel="icon" type="image/svg+xml" href="favicon.svg" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css" />
+  <style>
+    body { margin: 0; min-height: 100dvh; background: var(--bg-deep); color: var(--text); font-family: var(--sans); }
+    .settings-header {
+      height: 64px; padding: 0 28px; border-bottom: 1px solid var(--border-soft);
+      display: flex; align-items: center; justify-content: space-between; background: var(--bg);
+    }
+    .settings-wordmark { font-size: 17px; font-weight: 600; }
+    .settings-wordmark span { color: var(--text-dim); font-weight: 400; }
+    .back-link { color: var(--text-dim); text-decoration: none; font-size: 14px; }
+    .back-link:hover { color: var(--text); }
+    .settings-main { width: min(760px, calc(100% - 32px)); margin: 38px auto 80px; }
+    .settings-title { font-size: 28px; margin: 0 0 28px; letter-spacing: -.02em; }
+    .settings-card {
+      background: var(--bg); border: 1px solid var(--border); border-radius: var(--r-lg);
+      padding: 24px; margin-bottom: 18px;
+    }
+    .settings-card h2 { font-size: 17px; margin: 0 0 5px; }
+    .settings-card > p { color: var(--text-dim); font-size: 13px; margin: 0 0 20px; line-height: 1.5; }
+    .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .form-grid .wide { grid-column: 1 / -1; }
+    .field label { display: block; color: var(--text-dim); font-size: 12px; margin-bottom: 5px; }
+    .field input, .field select {
+      box-sizing: border-box; width: 100%; min-height: 40px; padding: 9px 11px;
+      border: 1px solid var(--border); border-radius: var(--r-md); background: var(--panel);
+      color: var(--text); font: 14px var(--sans); outline: none;
+    }
+    .field input:focus, .field select:focus { border-color: var(--accent); }
+    .settings-button {
+      min-height: 38px; padding: 8px 14px; border: 1px solid var(--border);
+      border-radius: var(--r-md); background: var(--panel-2); color: var(--text);
+      font: 600 13px var(--sans); cursor: pointer;
+    }
+    .settings-button.primary { background: var(--accent); border-color: var(--accent); color: var(--bg-deep); }
+    .settings-button.danger { color: var(--reject); }
+    .settings-button:disabled { opacity: .5; cursor: wait; }
+    .form-actions { display: flex; justify-content: flex-end; margin-top: 14px; }
+    .status-line { min-height: 20px; margin-top: 10px; font-size: 13px; color: var(--text-dim); }
+    .status-line.error { color: var(--reject); }
+    .profile-row {
+      display: grid; grid-template-columns: 1fr auto; gap: 14px; align-items: center;
+      padding: 13px 0; border-top: 1px solid var(--border-soft);
+    }
+    .profile-row:first-child { border-top: 0; }
+    .profile-name { font-weight: 600; }
+    .profile-meta { color: var(--text-ghost); font: 12px var(--mono); margin-top: 3px; }
+    .profile-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 7px; }
+    .section-divider { height: 1px; background: var(--border-soft); margin: 22px 0; }
+    .hidden { display: none !important; }
+    @media (max-width: 620px) {
+      .settings-header { padding: 0 18px; }
+      .settings-main { margin-top: 24px; }
+      .settings-card { padding: 19px; }
+      .form-grid { grid-template-columns: 1fr; }
+      .form-grid .wide { grid-column: auto; }
+      .profile-row { grid-template-columns: 1fr; }
+      .profile-actions { justify-content: flex-start; }
+    }
+  </style>
+</head>
+<body>
+  <header class="settings-header">
+    <div class="settings-wordmark">Photo<span>Desk</span></div>
+    <a class="back-link" href="./">← Back to library</a>
+  </header>
+
+  <main class="settings-main">
+    <h1 class="settings-title">Settings</h1>
+
+    <section class="settings-card">
+      <h2>Your Immich connection</h2>
+      <p id="credential-copy">Replace the API key used by your PhotoDesk profile. The key is write-only and will not be shown again.</p>
+      <form id="credential-form">
+        <div class="field">
+          <label for="credential-key">New Immich API key</label>
+          <input id="credential-key" type="password" autocomplete="new-password" required />
+        </div>
+        <div class="form-actions"><button class="settings-button primary" type="submit">Verify and save</button></div>
+        <div id="credential-status" class="status-line" role="status"></div>
+      </form>
+
+      <div class="section-divider"></div>
+
+      <h2>Change your passphrase</h2>
+      <p>Changing it signs out your other PhotoDesk sessions.</p>
+      <form id="passphrase-form">
+        <div class="form-grid">
+          <div class="field">
+            <label for="current-passphrase">Current passphrase</label>
+            <input id="current-passphrase" type="password" autocomplete="current-password" required />
+          </div>
+          <div class="field">
+            <label for="new-passphrase">New passphrase</label>
+            <input id="new-passphrase" type="password" autocomplete="new-password" minlength="4" required />
+          </div>
+        </div>
+        <div class="form-actions"><button class="settings-button" type="submit">Change passphrase</button></div>
+        <div id="passphrase-status" class="status-line" role="status"></div>
+      </form>
+    </section>
+
+    <section id="household-card" class="settings-card hidden">
+      <h2>Household profiles</h2>
+      <p>Create family profiles and manage access. Each person enrolls their own Immich API key after signing in.</p>
+      <div id="profile-list"></div>
+
+      <div class="section-divider"></div>
+
+      <form id="create-profile-form">
+        <div class="form-grid">
+          <div class="field">
+            <label for="profile-name">Display name</label>
+            <input id="profile-name" type="text" autocomplete="off" required />
+          </div>
+          <div class="field">
+            <label for="profile-role">Role</label>
+            <select id="profile-role"><option value="kid">Kid</option><option value="parent">Parent</option></select>
+          </div>
+          <div class="field wide">
+            <label for="profile-passphrase">Temporary passphrase</label>
+            <input id="profile-passphrase" type="password" autocomplete="new-password" minlength="4" required />
+          </div>
+        </div>
+        <div class="form-actions"><button class="settings-button primary" type="submit">Add profile</button></div>
+        <div id="profile-status" class="status-line" role="status"></div>
+      </form>
+    </section>
+  </main>
+
+  <script>
+    const $ = id => document.getElementById(id);
+    let currentProfile;
+
+    async function request(path, options = {}) {
+      const response = await fetch(path, {
+        ...options,
+        headers: { 'content-type': 'application/json', ...options.headers },
+      });
+      if (response.status === 401) {
+        window.location.href = 'login.html';
+        throw new Error('Authentication required');
+      }
+      const contentType = response.headers.get('content-type') || '';
+      const data = contentType.includes('application/json')
+        ? await response.json()
+        : null;
+      if (!data) {
+        throw new Error(`PhotoDesk returned an unexpected response (${response.status})`);
+      }
+      if (!response.ok) throw new Error(data.error || `Request failed: ${response.status}`);
+      return data;
+    }
+
+    function setStatus(element, message, error = false) {
+      element.textContent = message;
+      element.classList.toggle('error', error);
+    }
+
+    async function loadProfiles() {
+      const profiles = await request('/api/auth/admin/profiles');
+      const list = $('profile-list');
+      list.textContent = '';
+      profiles.forEach(profile => {
+        const row = document.createElement('div');
+        row.className = 'profile-row';
+        const info = document.createElement('div');
+        const name = document.createElement('div');
+        name.className = 'profile-name';
+        name.textContent = profile.displayName;
+        const meta = document.createElement('div');
+        meta.className = 'profile-meta';
+        meta.textContent = `${profile.role} · ${profile.status} · ${profile.immichConnected ? 'Immich connected' : 'needs Immich key'}`;
+        info.append(name, meta);
+
+        const actions = document.createElement('div');
+        actions.className = 'profile-actions';
+        if (profile.id !== currentProfile.id) {
+          const toggle = document.createElement('button');
+          toggle.className = `settings-button ${profile.status === 'disabled' ? '' : 'danger'}`;
+          toggle.type = 'button';
+          toggle.textContent = profile.status === 'disabled' ? 'Enable' : 'Disable';
+          toggle.addEventListener('click', async () => {
+            await request(`/api/auth/admin/profiles/${profile.id}`, {
+              method: 'PATCH',
+              body: JSON.stringify({ status: profile.status === 'disabled' ? 'active' : 'disabled' }),
+            });
+            await loadProfiles();
+          });
+          actions.append(toggle);
+        }
+        const reset = document.createElement('button');
+        reset.className = 'settings-button';
+        reset.type = 'button';
+        reset.textContent = 'Reset passphrase';
+        reset.addEventListener('click', async () => {
+          const passphrase = window.prompt(`New temporary passphrase for ${profile.displayName}:`);
+          if (!passphrase) return;
+          try {
+            await request(`/api/auth/admin/profiles/${profile.id}`, {
+              method: 'PATCH',
+              body: JSON.stringify({ passphrase }),
+            });
+            setStatus($('profile-status'), `Passphrase reset for ${profile.displayName}.`);
+          } catch (error) {
+            setStatus($('profile-status'), error.message, true);
+          }
+        });
+        actions.append(reset);
+        row.append(info, actions);
+        list.append(row);
+      });
+    }
+
+    $('credential-form').addEventListener('submit', async event => {
+      event.preventDefault();
+      const button = event.submitter;
+      button.disabled = true;
+      try {
+        const result = await request('/api/auth/immich-credential', {
+          method: 'POST',
+          body: JSON.stringify({ apiKey: $('credential-key').value }),
+        });
+        $('credential-key').value = '';
+        setStatus($('credential-status'), `Connected as ${result.immichUserName || 'verified user'}.`);
+        if (currentProfile.role === 'parent') await loadProfiles();
+      } catch (error) {
+        setStatus($('credential-status'), error.message, true);
+      } finally {
+        button.disabled = false;
+      }
+    });
+
+    $('passphrase-form').addEventListener('submit', async event => {
+      event.preventDefault();
+      const button = event.submitter;
+      button.disabled = true;
+      try {
+        await request('/api/auth/passphrase', {
+          method: 'POST',
+          body: JSON.stringify({
+            currentPassphrase: $('current-passphrase').value,
+            newPassphrase: $('new-passphrase').value,
+          }),
+        });
+        event.target.reset();
+        setStatus($('passphrase-status'), 'Passphrase changed.');
+      } catch (error) {
+        setStatus($('passphrase-status'), error.message, true);
+      } finally {
+        button.disabled = false;
+      }
+    });
+
+    $('create-profile-form').addEventListener('submit', async event => {
+      event.preventDefault();
+      const button = event.submitter;
+      button.disabled = true;
+      try {
+        const result = await request('/api/auth/admin/profiles', {
+          method: 'POST',
+          body: JSON.stringify({
+            displayName: $('profile-name').value,
+            role: $('profile-role').value,
+            passphrase: $('profile-passphrase').value,
+          }),
+        });
+        event.target.reset();
+        setStatus($('profile-status'), `Created ${result.displayName}.`);
+        await loadProfiles();
+      } catch (error) {
+        setStatus($('profile-status'), error.message, true);
+      } finally {
+        button.disabled = false;
+      }
+    });
+
+    (async () => {
+      try {
+        currentProfile = await request('/api/auth/me');
+        $('credential-copy').textContent = currentProfile.immichConnected
+          ? 'Replace the API key used by your PhotoDesk profile. The key is write-only and will not be shown again.'
+          : 'Add the API key used by your PhotoDesk profile. The key is write-only and will not be shown again.';
+        if (currentProfile.role === 'parent') {
+          $('household-card').classList.remove('hidden');
+          await loadProfiles();
+        }
+      } catch (error) {
+        if (error.message !== 'Authentication required') {
+          setStatus($('credential-status'), error.message, true);
+        }
+      }
+    })();
+
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden && currentProfile?.role === 'parent') {
+        loadProfiles().catch(error => setStatus($('profile-status'), error.message, true));
+      }
+    });
+  </script>
+</body>
+</html>

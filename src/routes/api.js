@@ -39,6 +39,20 @@ const {
   writeRenderedEdit,
 } = require('../edit-renderer');
 
+function profileCredentials(req) {
+  if (!req.profile) return undefined;
+  if (!req.profile.immich_api_key) return undefined;
+  return {
+    apiKey: req.profile.immich_api_key,
+    immichUrl: req.profile.immich_url || config.immichUrl,
+  };
+}
+
+function verifySessionOwner(db, sessionId, profileId) {
+  const session = db.prepare('SELECT profile_id FROM sessions WHERE id = ?').get(sessionId);
+  return session && session.profile_id === profileId;
+}
+
 function localDateBoundary(dateKey, endOfDay = false) {
   if (!dateKey || !/^\d{4}-\d{2}-\d{2}$/.test(dateKey)) return dateKey;
   return new Date(`${dateKey}T${endOfDay ? '23:59:59.999' : '00:00:00.000'}`).toISOString();
@@ -71,14 +85,14 @@ function sessionAssetMetadataMap(db, sessionId) {
   return metadata;
 }
 
-async function sessionOwnership(db, sessionId) {
-  const currentUser = await getCurrentUser();
+async function sessionOwnership(db, sessionId, credentials) {
+  const currentUser = await getCurrentUser(credentials);
   const metadata = sessionAssetMetadataMap(db, sessionId);
   const ownership = await Promise.all(
     [...metadata].map(async ([assetId, asset]) => {
       if (asset.ownerId) return { assetId, ownerId: asset.ownerId };
       try {
-        const remoteAsset = await getAssetInfo(assetId);
+        const remoteAsset = await getAssetInfo(assetId, credentials);
         return { assetId, ownerId: remoteAsset.ownerId };
       } catch {
         return { assetId, unverifiable: true };
@@ -132,11 +146,11 @@ function uploadTimestamp(value) {
   return Number.isFinite(timestamp) ? new Date(timestamp).toISOString() : new Date().toISOString();
 }
 
-async function uploadAndStackEdit(db, sessionId, edit, metadata = {}) {
+async function uploadAndStackEdit(db, sessionId, edit, metadata = {}, credentials) {
   let immichAssetId = edit.immich_asset_id;
 
   if (immichAssetId) {
-    const exists = await assetExists(immichAssetId);
+    const exists = await assetExists(immichAssetId, credentials);
     if (exists && edit.render_status === 'uploaded') {
       return { immichAssetId, alreadyApplied: true };
     }
@@ -165,7 +179,7 @@ async function uploadAndStackEdit(db, sessionId, edit, metadata = {}) {
       deviceAssetId: `photodesk:${sessionId}:${edit.asset_id}:${edit.updated_at}`,
       fileCreatedAt: createdAt,
       fileModifiedAt: modifiedAt,
-    });
+    }, credentials);
     if (!uploaded?.id) throw new Error('Immich upload returned no asset ID');
     immichAssetId = uploaded.id;
     db.prepare(`
@@ -177,7 +191,7 @@ async function uploadAndStackEdit(db, sessionId, edit, metadata = {}) {
     `).run(immichAssetId, edit.id);
   }
 
-  await stackEditedAsset(edit.asset_id, immichAssetId);
+  await stackEditedAsset(edit.asset_id, immichAssetId, credentials);
   db.prepare(`
     UPDATE edits
     SET render_status = 'uploaded',
@@ -338,9 +352,10 @@ router.get('/sessions', (req, res) => {
       COALESCE(SUM(CASE WHEN decisions.decision = 'reject' THEN 1 ELSE 0 END), 0) AS rejected_count
     FROM sessions
     LEFT JOIN decisions ON decisions.session_id = sessions.id
+    WHERE sessions.profile_id = ?
     GROUP BY sessions.id
     ORDER BY sessions.created_at DESC
-  `).all();
+  `).all(req.profile.id);
   res.json(sessions);
 });
 
@@ -355,10 +370,10 @@ router.post('/sessions', async (req, res) => {
     let assets = await fetchOwnedAssets({
       dateFrom: localDateBoundary(dateFrom),
       dateTo: localDateBoundary(dateTo, true),
-    });
+    }, profileCredentials(req));
     if (untriagedOnly) {
       const db = getDb();
-      const processed = processedAssetIds(db);
+      const processed = processedAssetIds(db, req.profile.id);
       assets = assets.filter(asset => !processed.has(asset.id));
     }
 
@@ -372,8 +387,8 @@ router.post('/sessions', async (req, res) => {
     const db = getDb();
 
     const insertSession = db.prepare(`
-      INSERT INTO sessions (name, total_assets, total_scenes, immich_url, date_from, date_to, scene_threshold)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO sessions (name, total_assets, total_scenes, immich_url, date_from, date_to, scene_threshold, profile_id)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     const insertScene = db.prepare(`
@@ -389,7 +404,8 @@ router.post('/sessions', async (req, res) => {
         config.immichUrl,
         dateFrom || null,
         dateTo || null,
-        Number(sceneThreshold)
+        Number(sceneThreshold),
+        req.profile.id
       );
       const sessionId = result.lastInsertRowid;
 
@@ -421,12 +437,12 @@ router.post('/sessions', async (req, res) => {
 });
 
 router.get('/health', async (req, res) => {
-  const apiKeySet = Boolean(config.immichApiKey);
+  const apiKeySet = Boolean(req.profile.immich_api_key);
   if (!apiKeySet) {
     return res.json({ immich: 'disconnected', apiKeySet: false });
   }
   try {
-    await checkConnection();
+    await checkConnection(profileCredentials(req));
     res.json({ immich: 'connected', apiKeySet: true });
   } catch (err) {
     res.status(503).json({
@@ -440,7 +456,7 @@ router.get('/health', async (req, res) => {
 router.get('/stats', async (req, res) => {
   try {
     const db = getDb();
-    const snapshot = await getLibrarySnapshot(db, { refresh: req.query.refresh === 'true' });
+    const snapshot = await getLibrarySnapshot(db, req.profile.id, { refresh: req.query.refresh === 'true', credentials: profileCredentials(req) });
     res.json({
       totalLibrary: snapshot.totalLibrary,
       totalProcessed: snapshot.totalProcessed,
@@ -458,7 +474,7 @@ router.get('/stats', async (req, res) => {
 router.get('/library/density', async (req, res) => {
   try {
     const db = getDb();
-    const snapshot = await getLibrarySnapshot(db, { refresh: req.query.refresh === 'true' });
+    const snapshot = await getLibrarySnapshot(db, req.profile.id, { refresh: req.query.refresh === 'true', credentials: profileCredentials(req) });
     res.json({
       computedAt: snapshot.computedAt,
       timezone: snapshot.timezone,
@@ -478,7 +494,7 @@ router.get('/library/density', async (req, res) => {
 router.get('/library/suggestions', async (req, res) => {
   try {
     const db = getDb();
-    const snapshot = await getLibrarySnapshot(db);
+    const snapshot = await getLibrarySnapshot(db, req.profile.id, { credentials: profileCredentials(req) });
     res.json(clusterSuggestions(snapshot));
   } catch (err) {
     console.error('[GET /library/suggestions]', err);
@@ -491,7 +507,7 @@ router.get('/library/range', async (req, res) => {
   if (!from || !to) return res.status(400).json({ error: 'from and to are required' });
   try {
     const db = getDb();
-    const snapshot = await getLibrarySnapshot(db);
+    const snapshot = await getLibrarySnapshot(db, req.profile.id, { credentials: profileCredentials(req) });
     res.json(rangeSummary(snapshot, from, to));
   } catch (err) {
     console.error('[GET /library/range]', err);
@@ -504,6 +520,7 @@ router.get('/sessions/:id', (req, res) => {
   const db = getDb();
   const session = db.prepare('SELECT * FROM sessions WHERE id = ?').get(req.params.id);
   if (!session) return res.status(404).json({ error: 'Session not found' });
+  if (session.profile_id !== req.profile.id) return res.status(404).json({ error: 'Session not found' });
 
   const scenes = db.prepare('SELECT * FROM scenes WHERE session_id = ? ORDER BY scene_index').all(req.params.id);
   const decisions = db.prepare('SELECT * FROM decisions WHERE session_id = ?').all(req.params.id);
@@ -529,6 +546,7 @@ router.get('/sessions/:id/scenes', (req, res) => {
   const db = getDb();
   const session = db.prepare('SELECT * FROM sessions WHERE id = ?').get(req.params.id);
   if (!session) return res.status(404).json({ error: 'Session not found' });
+  if (session.profile_id !== req.profile.id) return res.status(404).json({ error: 'Session not found' });
 
   const scenes = db.prepare('SELECT * FROM scenes WHERE session_id = ? ORDER BY scene_index').all(req.params.id);
   const decisions = db.prepare('SELECT * FROM decisions WHERE session_id = ?').all(req.params.id);
@@ -598,6 +616,9 @@ router.post('/decisions', (req, res) => {
   }
 
   const db = getDb();
+  if (!verifySessionOwner(db, sessionId, req.profile.id)) {
+    return res.status(404).json({ error: 'Session not found' });
+  }
 
   const upsert = db.prepare(`
     INSERT INTO decisions (session_id, asset_id, decision)
@@ -618,6 +639,9 @@ router.delete('/decisions', (req, res) => {
   }
 
   const db = getDb();
+  if (!verifySessionOwner(db, sessionId, req.profile.id)) {
+    return res.status(404).json({ error: 'Session not found' });
+  }
   db.prepare('DELETE FROM decisions WHERE session_id = ? AND asset_id = ?').run(sessionId, assetId);
   res.json({ ok: true });
 });
@@ -636,6 +660,9 @@ router.post('/ratings', (req, res) => {
   }
 
   const db = getDb();
+  if (!verifySessionOwner(db, sessionId, req.profile.id)) {
+    return res.status(404).json({ error: 'Session not found' });
+  }
 
   const upsert = db.prepare(`
     INSERT INTO ratings (session_id, asset_id, rating)
@@ -656,6 +683,9 @@ router.delete('/ratings', (req, res) => {
   }
 
   const db = getDb();
+  if (!verifySessionOwner(db, sessionId, req.profile.id)) {
+    return res.status(404).json({ error: 'Session not found' });
+  }
   db.prepare('DELETE FROM ratings WHERE session_id = ? AND asset_id = ?').run(sessionId, assetId);
   res.json({ ok: true });
 });
@@ -678,6 +708,9 @@ router.post('/edits', async (req, res, next) => {
 
   try {
     const db = getDb();
+    if (!verifySessionOwner(db, sessionId, req.profile.id)) {
+      return res.status(404).json({ error: 'Session not found' });
+    }
     const session = db.prepare('SELECT id FROM sessions WHERE id = ?').get(sessionId);
     if (!session) return res.status(404).json({ error: 'Session not found' });
     if (!sessionAssetIds(db, sessionId).includes(assetId)) {
@@ -702,7 +735,7 @@ router.post('/edits', async (req, res, next) => {
 
       let rendered;
       try {
-        const original = await getOriginalAssetBuffer(assetId);
+        const original = await getOriginalAssetBuffer(assetId, profileCredentials(req));
         rendered = await writeRenderedEdit({
           input: original.buffer,
           adjustments,
@@ -798,8 +831,11 @@ router.delete('/edits', async (req, res, next) => {
     return res.status(400).json({ error: 'sessionId and assetId are required' });
   }
   try {
+    const db = getDb();
+    if (!verifySessionOwner(db, sessionId, req.profile.id)) {
+      return res.status(404).json({ error: 'Session not found' });
+    }
     await withEditLock(sessionId, assetId, async () => {
-      const db = getDb();
       const edit = db.prepare(
         'SELECT rendered_path FROM edits WHERE session_id = ? AND asset_id = ?'
       ).get(sessionId, assetId);
@@ -819,6 +855,9 @@ router.get('/edits/capabilities', (req, res) => {
 
 router.get('/edits/:sessionId/:assetId/image', (req, res) => {
   const db = getDb();
+  if (!verifySessionOwner(db, req.params.sessionId, req.profile.id)) {
+    return res.status(404).json({ error: 'Rendered edit is not ready' });
+  }
   const edit = db.prepare(`
     SELECT rendered_path, render_status
     FROM edits
@@ -849,6 +888,9 @@ router.post('/stack-groups', (req, res) => {
   }
 
   const db = getDb();
+  if (!verifySessionOwner(db, sessionId, req.profile.id)) {
+    return res.status(404).json({ error: 'Session not found' });
+  }
 
   const session = db.prepare('SELECT id FROM sessions WHERE id = ?').get(sessionId);
   if (!session) return res.status(404).json({ error: 'Session not found' });
@@ -864,6 +906,10 @@ router.post('/stack-groups', (req, res) => {
 // DELETE /api/stack-groups/:id
 router.delete('/stack-groups/:id', (req, res) => {
   const db = getDb();
+  const group = db.prepare('SELECT session_id FROM stack_groups WHERE id = ?').get(req.params.id);
+  if (group && !verifySessionOwner(db, group.session_id, req.profile.id)) {
+    return res.status(404).json({ error: 'Session not found' });
+  }
   db.prepare('DELETE FROM stack_groups WHERE id = ?').run(req.params.id);
   res.json({ ok: true });
 });
@@ -876,6 +922,7 @@ router.post('/sessions/:id/commit', async (req, res) => {
 
   const session = db.prepare('SELECT * FROM sessions WHERE id = ?').get(sessionId);
   if (!session) return res.status(404).json({ error: 'Session not found' });
+  if (session.profile_id !== req.profile.id) return res.status(404).json({ error: 'Session not found' });
   let options;
   try {
     options = parseCommitOptions(req.body || {});
@@ -904,7 +951,7 @@ router.post('/sessions/:id/commit', async (req, res) => {
 
   let ownership;
   try {
-    ownership = await sessionOwnership(db, sessionId);
+    ownership = await sessionOwnership(db, sessionId, profileCredentials(req));
   } catch (err) {
     return res.status(502).json({
       error: clientErrorMessage(err, 'Unable to verify session asset ownership'),
@@ -1003,7 +1050,7 @@ router.post('/sessions/:id/commit', async (req, res) => {
       ));
       for (const item of pendingRejects) {
         try {
-          await trashAssets([item.payload.assetId]);
+          await trashAssets([item.payload.assetId], profileCredentials(req));
           recordCommitAction(db, sessionId, 'trash', item.key, item.payload, 'succeeded');
           results.assetsTrashed++;
           step('trash').succeeded++;
@@ -1020,7 +1067,7 @@ router.post('/sessions/:id/commit', async (req, res) => {
       for (const item of preview.items.ratings) {
         if (commitActionApplied(db, sessionId, 'rating', item.key, item.payload)) continue;
         try {
-          await updateAssetRating(item.payload.assetId, item.payload.rating);
+          await updateAssetRating(item.payload.assetId, item.payload.rating, profileCredentials(req));
           recordCommitAction(db, sessionId, 'rating', item.key, item.payload, 'succeeded');
           results.ratingsWritten++;
           step('ratings').succeeded++;
@@ -1040,7 +1087,7 @@ router.post('/sessions/:id/commit', async (req, res) => {
       for (const item of preview.items.stacks) {
         if (commitActionApplied(db, sessionId, 'stack', item.key, item.payload)) continue;
         try {
-          await createStack(item.payload.assetIds);
+          await createStack(item.payload.assetIds, profileCredentials(req));
           recordCommitAction(db, sessionId, 'stack', item.key, item.payload, 'succeeded');
           results.stacksCreated++;
           step('stacks').succeeded++;
@@ -1061,7 +1108,8 @@ router.post('/sessions/:id/commit', async (req, res) => {
               db,
               sessionId,
               edit,
-              assetMetadata.get(edit.asset_id) || {}
+              assetMetadata.get(edit.asset_id) || {},
+              profileCredentials(req)
             )
           ));
           if (uploadResult.alreadyApplied) {
@@ -1096,16 +1144,16 @@ router.post('/sessions/:id/commit', async (req, res) => {
       const processedIds = [...new Set([...assetIds, ...uploadedEditIds])];
       const markCommitted = db.transaction(() => {
         const insertProcessed = db.prepare(`
-          INSERT OR IGNORE INTO processed_assets (asset_id, session_id)
-          VALUES (?, ?)
+          INSERT OR IGNORE INTO processed_assets (asset_id, profile_id, session_id)
+          VALUES (?, ?, ?)
         `);
-        for (const assetId of processedIds) insertProcessed.run(assetId, sessionId);
+        for (const assetId of processedIds) insertProcessed.run(assetId, req.profile.id, sessionId);
         db.prepare(`
           UPDATE sessions
           SET committed = 1, committed_at = datetime('now')
           WHERE id = ?
         `).run(sessionId);
-        invalidateLibraryCache(db);
+        invalidateLibraryCache(db, req.profile.id);
       });
       markCommitted();
       results.committed = true;
@@ -1138,9 +1186,9 @@ router.post('/sessions/:id/commit', async (req, res) => {
 // GET /api/proxy/thumbnail/:assetId
 router.get('/proxy/thumbnail/:assetId', async (req, res) => {
   try {
-    const { buffer, contentType } = await getThumbnailBuffer(req.params.assetId);
+    const { buffer, contentType } = await getThumbnailBuffer(req.params.assetId, profileCredentials(req));
     res.set('Content-Type', contentType);
-    res.set('Cache-Control', 'public, max-age=86400');
+    res.set('Cache-Control', 'private, max-age=86400');
     res.send(buffer);
   } catch (err) {
     console.error('[thumbnail proxy]', err.message);

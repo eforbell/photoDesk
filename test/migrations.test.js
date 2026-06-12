@@ -9,6 +9,7 @@ const {
   BASELINE_SHAPE,
   migrateDatabase,
 } = require('../db/migrate');
+const { bootstrapProfileCredential } = require('../src/db');
 
 function silentLogger() {
   return { log() {} };
@@ -30,7 +31,7 @@ test('fresh database applies the current schema baseline', () => {
   const db = new Database(temp.path);
   try {
     const result = migrateDatabase(db, { logger: silentLogger() });
-    assert.equal(result.applied, 4);
+    assert.equal(result.applied, 5);
     assert.equal(result.adopted, false);
 
     const tables = new Set(
@@ -41,6 +42,8 @@ test('fresh database applies the current schema baseline', () => {
     assert.ok(tables.has('edits'));
     assert.ok(tables.has('commit_actions'));
     assert.ok(tables.has('commit_runs'));
+    assert.ok(tables.has('profiles'));
+    assert.ok(tables.has('auth_sessions'));
     assert.deepEqual(
       db.prepare('SELECT filename FROM schema_migrations ORDER BY filename').all(),
       [
@@ -48,6 +51,7 @@ test('fresh database applies the current schema baseline', () => {
         { filename: '002-baseline-indexes.sql' },
         { filename: '003-editor-state.sql' },
         { filename: '004-commit-history.sql' },
+        { filename: '005-household-profiles.sql' },
       ]
     );
   } finally {
@@ -65,6 +69,45 @@ test('migration runner is idempotent', () => {
     assert.equal(second.applied, 0);
     assert.equal(second.adopted, false);
   } finally {
+    db.close();
+    temp.cleanup();
+  }
+});
+
+test('existing environment credential seeds only the untouched bootstrap profile', () => {
+  const temp = tempDatabase();
+  const db = new Database(temp.path);
+  const previousKey = process.env.IMMICH_API_KEY;
+  const previousUrl = process.env.IMMICH_URL;
+  try {
+    migrateDatabase(db, { logger: silentLogger() });
+    process.env.IMMICH_API_KEY = 'existing-production-key';
+    process.env.IMMICH_URL = 'http://immich.production';
+
+    assert.equal(bootstrapProfileCredential(db), 1);
+    assert.deepEqual(
+      db.prepare('SELECT immich_api_key, immich_url FROM profiles WHERE id = 1').get(),
+      {
+        immich_api_key: 'existing-production-key',
+        immich_url: 'http://immich.production',
+      }
+    );
+
+    db.prepare(`
+      UPDATE profiles
+      SET passphrase_hash = 'configured', immich_api_key = NULL
+      WHERE id = 1
+    `).run();
+    assert.equal(bootstrapProfileCredential(db), 0);
+    assert.equal(
+      db.prepare('SELECT immich_api_key FROM profiles WHERE id = 1').get().immich_api_key,
+      null
+    );
+  } finally {
+    if (previousKey === undefined) delete process.env.IMMICH_API_KEY;
+    else process.env.IMMICH_API_KEY = previousKey;
+    if (previousUrl === undefined) delete process.env.IMMICH_URL;
+    else process.env.IMMICH_URL = previousUrl;
     db.close();
     temp.cleanup();
   }
@@ -89,7 +132,7 @@ test('existing matching database adopts the baseline without losing data', () =>
     db.prepare(`INSERT INTO sessions (name) VALUES (?)`).run('Keep me');
 
     const result = migrateDatabase(db, { logger: silentLogger() });
-    assert.equal(result.applied, 3);
+    assert.equal(result.applied, 4);
     assert.equal(result.adopted, true);
     assert.equal(db.prepare('SELECT name FROM sessions').get().name, 'Keep me');
     assert.deepEqual(
@@ -99,6 +142,7 @@ test('existing matching database adopts the baseline without losing data', () =>
         { filename: '002-baseline-indexes.sql' },
         { filename: '003-editor-state.sql' },
         { filename: '004-commit-history.sql' },
+        { filename: '005-household-profiles.sql' },
       ]
     );
     const indexes = new Set(
@@ -106,6 +150,7 @@ test('existing matching database adopts the baseline without losing data', () =>
         .map(row => row.name)
     );
     assert.ok(indexes.has('idx_scenes_session'));
+    assert.ok(indexes.has('idx_sessions_profile'));
   } finally {
     db.close();
     temp.cleanup();
