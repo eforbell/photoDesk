@@ -1,16 +1,23 @@
 {
-  "currentFeature": "Feature #4: Commit Hardening + Edited Asset Upload",
-  "status": "ready-for-review",
-  "branch": "feature/4-commit-hardening",
-  "prdPath": "planning/features/feature-4-commit-hardening.json",
+  "currentFeature": "Feature #6: Editor Interaction Upgrades",
+  "status": "planned",
+  "branch": "feature/6-editor-interaction-upgrades",
+  "prdPath": "planning/features/feature-6-editor-interaction-upgrades.json",
+  "testSpecPath": "planning/features/feature-6-editor-interaction-upgrades-test-spec.md",
   "completedFeatures": [
-    "Feature #0: Foundation (Express backend, SQLite, Immich API client, scene clustering, basic multi-pass culling UI)",
+    "Feature #0: Foundation (Express backend, SQLite, Immich API client, scene clustering, basic multi-pass review UI)",
     "Feature #1: Visual System + Workspace Redesign",
     "Feature #2: Library / Discover Screen",
-    "Feature #3: Editor (Crop + Adjustments + Presets)"
+    "Feature #3: Editor (Crop + Adjustments + Presets)",
+    "Feature #4: Commit Hardening + Edited Asset Upload",
+    "Feature #5: Household Profiles + Scoped Immich Credentials"
   ],
   "skippedFeatures": [],
   "futureFeatures": [
-    "Household Profiles + Scoped Immich Credentials (unscheduled backlog discovery)"
+    "Full iPhone HEIC editing support",
+    "Bounded-memory source rendering",
+    "Before/after compare",
+    "Straighten and rotate",
+    "Per-user favorite editing profiles"
   ]
 }

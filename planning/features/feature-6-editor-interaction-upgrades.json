@@ -1,0 +1,221 @@
+{
+  "featureName": "Editor Interaction Upgrades",
+  "workingNumber": 6,
+  "branchName": "feature/6-editor-interaction-upgrades",
+  "status": "planned",
+  "priority": "P1",
+  "summary": "Complete the light-editor interaction model with draggable and resizable off-center crops, crop-aware adjustment previews, and a grouped editing-profile gallery with live thumbnails and intensity. Preserve the existing non-destructive render, persistence, and Immich commit contracts.",
+  "designReference": [
+    "design/design_handoff_photodesk/EDITOR_UPGRADE.md",
+    "design/design_handoff_photodesk/editor-crop.jsx",
+    "design/design_handoff_photodesk/editor-lab.jsx",
+    "design/design_handoff_photodesk/Editor Lab.html"
+  ],
+  "terminology": {
+    "editingProfile": "A predefined set of eight image adjustments, also called a look or preset.",
+    "householdProfile": "An authenticated PhotoDesk user. Household-profile behavior is not part of Feature 6.",
+    "durableRecipe": "Only normalized crop coordinates and the eight adjustment values are persisted. Selected editing profile and intensity are transient UI provenance."
+  },
+  "actionabilityAssessment": {
+    "verdict": "actionable",
+    "confidence": "high",
+    "supportedToday": [
+      "The server already accepts arbitrary normalized crop rectangles that remain inside the image.",
+      "The Sharp renderer already extracts arbitrary normalized regions before applying adjustments.",
+      "The browser and server already share an eight-parameter adjustment model suitable for all proposed editing profiles.",
+      "The current editor already contain-fits portrait and landscape images and has responsive desktop/mobile layouts."
+    ],
+    "requiredCorrections": [
+      "True Free crop requires adding Free to both browser and server aspect allowlists; this is a small backend validation change.",
+      "Flip turns 16:9 into 9:16, which the handoff's sample server allowlist omits. Feature 6 must support 9:16 as the flipped orientation even if it is not a primary aspect chip.",
+      "Switching from Crop to Adjust must change the stage from a full-source image plus overlay to a crop-aware preview with explicit dimensions.",
+      "Editing-profile selection and intensity are not added to SQLite. Reopened edits derive only from saved adjustment values and should display a matching profile when unambiguous, otherwise Custom.",
+      "Pointer behavior must be implemented with pointer capture/cancel cleanup rather than copying React/window-listener mechanics literally.",
+      "Off-center crop verification must include EXIF-oriented portrait input because the server auto-orients before extraction."
+    ]
+  },
+  "principles": [
+    "The preview must describe the exact saved crop and adjustment recipe.",
+    "Crop interaction remains source-faithful: the full image is visible in Crop, while Adjust shows the framed result.",
+    "Original assets remain untouched; Feature 6 does not change rendering, upload, stacking, or commit semantics.",
+    "The editor stays desktop-first but every critical crop and profile action remains touch-operable at phone width.",
+    "Do not persist redundant editing-profile metadata when the normalized adjustment recipe is already authoritative."
+  ],
+  "scope": {
+    "included": [
+      "Move and resize crop rectangles with pointer and touch input.",
+      "Locked aspect ratios, Free aspect, orientation Flip including 16:9 to 9:16, minimum visual crop size, clamping, and aspect refitting around the current center.",
+      "Light resting crop surround and stronger active-drag surround.",
+      "Crop-aware Adjust-stage preview and explicit Apply crop & adjust action.",
+      "Fifteen grouped editing profiles using the approved values.",
+      "Current-asset live profile thumbnails including temperature and vignette overlays.",
+      "Editing-profile intensity from 0 through 100 percent.",
+      "Custom/edited state after manual slider changes.",
+      "Regression, renderer, browser, touch, and responsive verification."
+    ],
+    "excluded": [
+      "Straighten or rotate.",
+      "Before/after compare.",
+      "Per-household-user favorite editing profiles.",
+      "Changes to SQLite schema.",
+      "Changes to Immich upload, stack, or commit behavior.",
+      "Changes to household authentication profiles."
+    ]
+  },
+  "stories": [
+    {
+      "id": "EU-001",
+      "title": "Move a crop",
+      "requirement": "Dragging inside the crop rectangle repositions it without changing size and never allows it outside the displayed source image."
+    },
+    {
+      "id": "EU-002",
+      "title": "Resize a locked crop",
+      "requirement": "Dragging any corner resizes around the opposite corner, preserves the selected source-pixel aspect ratio, observes a 44 CSS-pixel minimum, and clamps to the image."
+    },
+    {
+      "id": "EU-003",
+      "title": "Resize a Free crop",
+      "requirement": "Free mode exposes corner and edge handles; edge handles change only their corresponding boundary and the saved recipe uses aspect Free."
+    },
+    {
+      "id": "EU-004",
+      "title": "Refit and flip aspect",
+      "requirement": "Selecting an aspect refits the current crop around its center rather than resetting to a centered full-span crop. Flip swaps named W:H ratios and preserves the crop center as far as image bounds allow."
+    },
+    {
+      "id": "EU-005",
+      "title": "Lock crop into adjustment workflow",
+      "requirement": "The Adjust tab and Apply crop & adjust action show a bright contain-fitted preview of only the selected crop, with current adjustments applied and no crop surround."
+    },
+    {
+      "id": "EU-006",
+      "title": "Browse editing profiles visually",
+      "requirement": "Profiles are grouped as Standard, White balance, Black & white, and Film & vintage. Every tile previews the current asset with that profile's complete CSS filter and overlays."
+    },
+    {
+      "id": "EU-007",
+      "title": "Control profile intensity",
+      "requirement": "Selecting a non-Original profile starts at 100 percent. Moving intensity recomputes every adjustment from the immutable profile base and rounds to integer values."
+    },
+    {
+      "id": "EU-008",
+      "title": "Customize after selecting a profile",
+      "requirement": "Manual slider changes modify the working adjustment recipe without mutating the profile definition and visibly mark the selection as Custom or edited."
+    },
+    {
+      "id": "EU-009",
+      "title": "Save exact off-center results",
+      "requirement": "Saving an off-center crop persists the normalized coordinates, renders that region locally, and preserves all existing retry and non-destructive guarantees."
+    }
+  ],
+  "implementation": {
+    "browserHelpers": [
+      "Extend public/editor.js with Free, grouped profile definitions, adjustment scaling/equality helpers, crop normalization/clamping, aspect refit/flip, and crop display geometry.",
+      "Keep crop math pure and independent of the DOM so pointer and aspect behavior can be unit tested.",
+      "Retain all seven existing profile adjustment values exactly at 100 percent."
+    ],
+    "editorStateAndInteraction": [
+      "Add transient selected-profile ID, intensity, interaction state, and crop pointer state in public/app.js.",
+      "Use Pointer Events and setPointerCapture/releasePointerCapture on crop handles; handle pointercancel and editor close cleanup.",
+      "Read the live editor image frame rectangle at pointer-down and normalize every update against that rectangle.",
+      "Avoid re-rendering the complete control panel during pointermove; update crop geometry and preview state directly."
+    ],
+    "preview": [
+      "Keep the source image contain-fitted in Crop mode.",
+      "Render the crop window, grid, handles, cursor states, and resting/active surround in a dedicated overlay.",
+      "In Adjust mode, size the displayed crop from source dimensions and normalized crop dimensions, then paint the correct source region with crop-aware background size/position or an equivalent clipped image transform.",
+      "Apply adjustment filter, temperature overlay, and vignette overlay after crop framing so browser composition matches Sharp's crop-then-adjust order."
+    ],
+    "controls": [
+      "Replace text preset pills with grouped four-column profile tiles on desktop and a touch-safe responsive grid on narrow screens.",
+      "Use the current asset thumbnail URL for every profile tile and browser caching to avoid duplicate network payloads.",
+      "Show intensity only for non-Original profile selections.",
+      "Show Custom after a manual slider differs from the selected profile at the current intensity.",
+      "Add Free and Flip to crop controls plus Apply crop & adjust."
+    ],
+    "server": [
+      "Add Free and 9:16 to src/editor.js ASPECTS. Keep the primary chip list aligned with the handoff while allowing 9:16 as the persisted flipped form of 16:9.",
+      "Do not change renderer behavior or schema.",
+      "Preserve server validation of normalized bounds and positive dimensions."
+    ],
+    "stylesAndMarkup": [
+      "Update public/index.html only where stable crop-overlay elements improve lifecycle and accessibility; dynamic profile/crop controls remain rendered by public/app.js.",
+      "Extend public/styles.css using the existing editor tokens, panel width, breakpoints, and touch layout.",
+      "Give crop handles at least 22 CSS pixels of visible geometry and approximately 44 CSS pixels of hit area without obscuring the crop."
+    ]
+  },
+  "acceptanceCriteria": [
+    "A landscape and portrait asset can each be cropped off-center, saved, reopened, and rendered to the expected source region.",
+    "At every locked aspect and after Flip, the crop's source-pixel width/height ratio differs from target by no more than 0.2 percent after clamping.",
+    "Free mode permits independent north, east, south, and west edge movement and server validation accepts aspect Free.",
+    "Crop coordinates always remain finite, within 0 through 1, with positive width/height and x+width/y+height no greater than 1.000001.",
+    "The crop surround uses approximately 0.26 opacity at rest and approximately 0.6 during an active pointer interaction.",
+    "Adjust mode displays only the framed crop and remains contain-fitted for portrait, landscape, square, and narrow mobile stages.",
+    "All fifteen editing profiles render current-photo thumbnails; the original seven have unchanged adjustment definitions.",
+    "At 60 percent intensity, each persisted adjustment equals Math.round(baseValue * 0.6).",
+    "Manual slider input after profile selection visibly changes the state to Custom without altering the profile base or intensity calculation.",
+    "Saving and reopening preserves the exact adjustment and crop recipe; profile/intensity provenance is not required to round-trip.",
+    "The generated JPEG dimensions and sampled content prove the off-center region, including an EXIF-oriented portrait fixture.",
+    "No migration is introduced and all existing edit, commit, profile-isolation, and secrets tests remain passing.",
+    "Desktop and 390x844 browser checks prove pointer/touch reachability, no horizontal overflow, visible Save/Cancel, and usable profile tiles."
+  ],
+  "risks": [
+    {
+      "risk": "Aspect math is calculated in normalized coordinates without accounting for source dimensions.",
+      "mitigation": "Define locked ratios in displayed/source pixels and unit test landscape and portrait inputs separately."
+    },
+    {
+      "risk": "Immich thumbnail orientation and Sharp auto-orientation disagree for off-center coordinates.",
+      "mitigation": "Add an EXIF orientation fixture and compare preview geometry assumptions with the rendered extraction result."
+    },
+    {
+      "risk": "Pointer listeners remain active after release, cancel, tab switch, or editor close.",
+      "mitigation": "Use pointer capture with one teardown path and browser tests for pointercancel/editor close."
+    },
+    {
+      "risk": "Fifteen live profile previews cause excessive image requests or scrolling jank.",
+      "mitigation": "Reuse one cached thumbnail URL, keep overlays CSS-only, avoid canvas copies, and observe network/request count during browser validation."
+    },
+    {
+      "risk": "Re-rendering controls during drag destroys the active pointer target.",
+      "mitigation": "Separate geometry updates from control rendering and render controls only on aspect/tool/profile changes."
+    },
+    {
+      "risk": "Profile/intensity UI implies durable provenance that is not stored.",
+      "mitigation": "Treat the saved adjustment recipe as authoritative and label unmatched reopened recipes Custom."
+    }
+  ],
+  "deliverySlices": [
+    {
+      "slice": 1,
+      "name": "Crop math and validation contract",
+      "outcome": "Pure tested crop helpers, Free validation, aspect refit/flip, and off-center renderer proof."
+    },
+    {
+      "slice": 2,
+      "name": "Interactive crop surface",
+      "outcome": "Pointer/touch move and resize, handles, active dimming, crop controls, and responsive browser validation."
+    },
+    {
+      "slice": 3,
+      "name": "Crop-aware adjustment stage",
+      "outcome": "Adjust renders the locked crop exactly and Apply crop & adjust makes the transition explicit."
+    },
+    {
+      "slice": 4,
+      "name": "Editing-profile gallery",
+      "outcome": "Grouped live previews, approved profile set, intensity, Custom state, and mobile layout."
+    },
+    {
+      "slice": 5,
+      "name": "End-to-end render verification",
+      "outcome": "Real browser save/reopen and Sharp output checks for off-center crop plus scaled editing profile, followed by full regression and visual review."
+    }
+  ],
+  "deferred": [
+    "Before/after compare using the backslash key.",
+    "Straighten and rotate renderer support.",
+    "Per-household-profile favorite editing profiles."
+  ]
+}
