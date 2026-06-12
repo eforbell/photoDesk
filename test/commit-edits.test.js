@@ -69,6 +69,27 @@ const { getDb } = require('../src/db');
 
 let server;
 let baseUrl;
+let authToken;
+
+function authenticateProfile() {
+  const db = getDb();
+  db.prepare(`
+    UPDATE profiles
+    SET immich_api_key = 'test-key',
+        immich_user_id = 'user-1',
+        immich_verified_at = datetime('now'),
+        status = 'active',
+        passphrase_hash = 'not-used'
+    WHERE id = 1
+  `).run();
+  const crypto = require('crypto');
+  const token = crypto.randomUUID();
+  const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
+  db.prepare(
+    'INSERT INTO auth_sessions (token, profile_id, expires_at) VALUES (?, 1, ?)'
+  ).run(token, expiresAt);
+  return token;
+}
 
 function createReadySession(name) {
   const db = getDb();
@@ -102,7 +123,7 @@ function createReadySession(name) {
 async function commit(sessionId, { dryRun = false } = {}) {
   const response = await nativeFetch(`${baseUrl}/api/sessions/${sessionId}/commit${dryRun ? '?dryRun=true' : ''}`, {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: { 'content-type': 'application/json', 'cookie': `pd_session=${authToken}` },
     body: JSON.stringify({
       trashRejects: false,
       writeRatings: false,
@@ -121,6 +142,7 @@ test.before(async () => {
       resolve();
     });
   });
+  authToken = authenticateProfile();
 });
 
 test.after(async () => {

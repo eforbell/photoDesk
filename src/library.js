@@ -167,9 +167,9 @@ function relativeDate(dateKey, now = new Date()) {
   return `${diff} days ago`;
 }
 
-function readCachedSnapshot(db, refresh = false) {
+function readCachedSnapshot(db, profileId, refresh = false) {
   if (refresh) return null;
-  const row = db.prepare('SELECT computed_at, data FROM density_cache WHERE id = 1').get();
+  const row = db.prepare('SELECT computed_at, data FROM density_cache WHERE profile_id = ?').get(profileId);
   if (!row) return null;
   const age = Date.now() - Date.parse(row.computed_at);
   if (!Number.isFinite(age) || age > CACHE_TTL_MS) return null;
@@ -178,37 +178,34 @@ function readCachedSnapshot(db, refresh = false) {
   return snapshot;
 }
 
-function processedAssetIds(db) {
-  const ids = new Set(
-    db.prepare('SELECT asset_id FROM processed_assets').all().map(row => row.asset_id)
-  );
-  for (const row of db.prepare(`
-    SELECT immich_asset_id
-    FROM edits
-    WHERE immich_asset_id IS NOT NULL
-  `).all()) {
-    ids.add(row.immich_asset_id);
-  }
-  return ids;
+function processedAssetIds(db, profileId) {
+  const rows = db.prepare('SELECT asset_id FROM processed_assets WHERE profile_id = ?').all(profileId);
+  return new Set(rows.map(row => row.asset_id));
 }
 
-async function getLibrarySnapshot(db, { refresh = false } = {}) {
-  const cached = readCachedSnapshot(db, refresh);
+async function getLibrarySnapshot(db, profileId, { refresh = false, credentials } = {}) {
+  const cached = readCachedSnapshot(db, profileId, refresh);
   if (cached) return cached;
 
-  const assets = await fetchOwnedAssets();
-  const processedIds = processedAssetIds(db);
+  const assets = await fetchOwnedAssets({}, credentials);
+  const processedIds = processedAssetIds(db, profileId);
   const snapshot = buildSnapshot(assets, processedIds);
   db.prepare(`
-    INSERT INTO density_cache (id, computed_at, data)
-    VALUES (1, ?, ?)
-    ON CONFLICT(id) DO UPDATE SET computed_at = excluded.computed_at, data = excluded.data
-  `).run(snapshot.computedAt, JSON.stringify(snapshot));
+    INSERT INTO density_cache (profile_id, computed_at, data)
+    VALUES (?, ?, ?)
+    ON CONFLICT(profile_id) DO UPDATE SET
+      computed_at = excluded.computed_at,
+      data = excluded.data
+  `).run(profileId, snapshot.computedAt, JSON.stringify(snapshot));
   return snapshot;
 }
 
-function invalidateLibraryCache(db) {
-  db.prepare('DELETE FROM density_cache').run();
+function invalidateLibraryCache(db, profileId) {
+  if (profileId) {
+    db.prepare('DELETE FROM density_cache WHERE profile_id = ?').run(profileId);
+  } else {
+    db.prepare('DELETE FROM density_cache').run();
+  }
 }
 
 module.exports = {

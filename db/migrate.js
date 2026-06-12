@@ -106,6 +106,8 @@ function migrateDatabase(db, { logger = console } = {}) {
 
     const sql = fs.readFileSync(path.join(MIGRATIONS_DIR, file), 'utf8');
     logger.log(`  apply: ${file}`);
+    // Table rebuilds (DROP+RENAME) require FK checks off; can't toggle inside a txn
+    db.pragma('foreign_keys = OFF');
     const apply = db.transaction(() => {
       db.exec(sql);
       insertApplied.run(file);
@@ -115,6 +117,12 @@ function migrateDatabase(db, { logger = console } = {}) {
       count++;
     } catch (err) {
       throw new Error(`Migration ${file} failed: ${err.message}`);
+    } finally {
+      db.pragma('foreign_keys = ON');
+    }
+    const fkErrors = db.pragma('foreign_key_check');
+    if (fkErrors.length > 0) {
+      throw new Error(`Migration ${file} left FK violations: ${JSON.stringify(fkErrors)}`);
     }
   }
 

@@ -1,0 +1,434 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>PhotoDesk — Sign in</title>
+  <link rel="icon" type="image/svg+xml" href="favicon.svg" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css" />
+  <style>
+    /* ── Login page layout ─────────────────────────────────── */
+    body {
+      margin: 0;
+      min-height: 100dvh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: var(--bg-deep);
+      font-family: var(--sans);
+      color: var(--text);
+      -webkit-font-smoothing: antialiased;
+    }
+
+    .login-card {
+      width: 100%;
+      max-width: 380px;
+      margin: 24px;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: var(--r-lg);
+      padding: 40px 32px 36px;
+      box-shadow: var(--shadow-3);
+    }
+
+    /* ── Wordmark ──────────────────────────────────────────── */
+    .login-wordmark {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 32px;
+    }
+
+    .login-wordmark-icon {
+      width: 40px;
+      height: 40px;
+      color: var(--accent);
+    }
+
+    .login-wordmark-text {
+      font-size: 22px;
+      font-weight: 600;
+      letter-spacing: -0.02em;
+    }
+
+    .login-wordmark-text span {
+      font-weight: 400;
+      color: var(--text-dim);
+    }
+
+    /* ── Profile list ──────────────────────────────────────── */
+    .profile-list {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      margin-bottom: 20px;
+    }
+
+    .profile-btn {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      width: 100%;
+      padding: 12px 14px;
+      background: var(--panel);
+      border: 1px solid var(--border-soft);
+      border-radius: var(--r-md);
+      color: var(--text);
+      font-family: var(--sans);
+      font-size: 15px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: background 0.15s, border-color 0.15s;
+    }
+
+    .profile-btn:hover {
+      background: var(--panel-2);
+      border-color: var(--border);
+    }
+
+    .profile-btn.selected {
+      background: var(--accent-dim);
+      border-color: var(--accent);
+    }
+
+    .profile-avatar {
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      background: var(--panel-2);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--text-dim);
+      flex-shrink: 0;
+    }
+
+    .profile-btn.selected .profile-avatar {
+      background: var(--accent);
+      color: var(--bg-deep);
+    }
+
+    /* ── Passphrase form ───────────────────────────────────── */
+    .passphrase-form {
+      display: none;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .passphrase-form.visible {
+      display: flex;
+    }
+
+    .form-label {
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--text-dim);
+    }
+
+    .form-input {
+      width: 100%;
+      padding: 10px 12px;
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: var(--r-md);
+      color: var(--text);
+      font-family: var(--sans);
+      font-size: 15px;
+      outline: none;
+      transition: border-color 0.15s;
+      box-sizing: border-box;
+    }
+
+    .form-input:focus {
+      border-color: var(--accent);
+    }
+
+    .form-input::placeholder {
+      color: var(--text-ghost);
+    }
+
+    .login-btn {
+      padding: 10px 0;
+      background: var(--accent);
+      border: none;
+      border-radius: var(--r-md);
+      color: var(--bg-deep);
+      font-family: var(--sans);
+      font-size: 15px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: opacity 0.15s;
+    }
+
+    .login-btn:hover {
+      opacity: 0.88;
+    }
+
+    .login-btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    /* ── Error message ─────────────────────────────────────── */
+    .error-msg {
+      display: none;
+      padding: 10px 12px;
+      background: var(--reject-dim);
+      border: 1px solid var(--reject);
+      border-radius: var(--r-md);
+      color: var(--reject);
+      font-size: 13px;
+      font-weight: 500;
+    }
+
+    .error-msg.visible {
+      display: block;
+    }
+
+    /* ── Setup (fresh install) ─────────────────────────────── */
+    .setup-section {
+      display: none;
+      flex-direction: column;
+      gap: 14px;
+    }
+
+    .setup-section.visible {
+      display: flex;
+    }
+
+    .setup-heading {
+      font-size: 16px;
+      font-weight: 600;
+      text-align: center;
+      margin-bottom: 2px;
+    }
+
+    .setup-subtext {
+      font-size: 13px;
+      color: var(--text-dim);
+      text-align: center;
+      line-height: 1.5;
+      margin-bottom: 4px;
+    }
+
+    /* ── Loading state ─────────────────────────────────────── */
+    .login-loading {
+      text-align: center;
+      color: var(--text-ghost);
+      font-size: 14px;
+      padding: 20px 0;
+    }
+
+    /* ── Responsive ────────────────────────────────────────── */
+    @media (max-width: 480px) {
+      .login-card {
+        margin: 16px;
+        padding: 32px 20px 28px;
+      }
+    }
+  </style>
+</head>
+<body>
+
+  <div class="login-card">
+    <div class="login-wordmark">
+      <svg class="login-wordmark-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M12 4l9 5-9 5-9-5z" fill="currentColor" fill-opacity=".15"/><path d="M3 9l9 5 9-5"/><path d="M3 13.5l9 5 9-5"/><path d="M3 18l9 5 9-5"/>
+      </svg>
+      <div class="login-wordmark-text">Photo<span>Desk</span></div>
+    </div>
+
+    <div id="loading" class="login-loading">Loading profiles&hellip;</div>
+
+    <!-- Profile selection -->
+    <div id="profiles-section" style="display:none;">
+      <div id="profile-list" class="profile-list"></div>
+
+      <form id="passphrase-form" class="passphrase-form" autocomplete="off">
+        <label class="form-label" for="passphrase">Passphrase</label>
+        <input class="form-input" id="passphrase" name="passphrase" type="password" placeholder="Enter your passphrase" required />
+        <div id="error-msg" class="error-msg"></div>
+        <button class="login-btn" type="submit">Sign in</button>
+      </form>
+    </div>
+
+    <!-- Fresh install setup -->
+    <div id="setup-section" class="setup-section">
+      <div class="setup-heading">Set up PhotoDesk</div>
+      <div class="setup-subtext">Create the first parent profile to get started.</div>
+      <form id="setup-form" autocomplete="off" style="display:flex;flex-direction:column;gap:12px;">
+        <label class="form-label" for="setup-name">Display name</label>
+        <input class="form-input" id="setup-name" name="displayName" type="text" placeholder="e.g. Mom, Dad" required />
+        <label class="form-label" for="setup-pass">Passphrase</label>
+        <input class="form-input" id="setup-pass" name="passphrase" type="password" placeholder="Choose a passphrase" required />
+        <div id="setup-error" class="error-msg"></div>
+        <button class="login-btn" type="submit">Create profile</button>
+      </form>
+    </div>
+  </div>
+
+  <script>
+    (function () {
+      var loading = document.getElementById('loading');
+      var profilesSection = document.getElementById('profiles-section');
+      var profileList = document.getElementById('profile-list');
+      var passphraseForm = document.getElementById('passphrase-form');
+      var passphraseInput = document.getElementById('passphrase');
+      var errorMsg = document.getElementById('error-msg');
+      var setupSection = document.getElementById('setup-section');
+      var setupForm = document.getElementById('setup-form');
+      var setupError = document.getElementById('setup-error');
+
+      var selectedProfileId = null;
+
+      function initial(name) {
+        return (name || '?').charAt(0).toUpperCase();
+      }
+
+      function showError(el, msg) {
+        el.textContent = msg;
+        el.classList.add('visible');
+      }
+
+      function hideError(el) {
+        el.textContent = '';
+        el.classList.remove('visible');
+      }
+
+      function renderProfiles(profiles) {
+        loading.style.display = 'none';
+
+        if (!profiles || profiles.length === 0) {
+          setupSection.classList.add('visible');
+          return;
+        }
+
+        profilesSection.style.display = 'block';
+
+        profileList.innerHTML = '';
+        profiles.forEach(function (p) {
+          var btn = document.createElement('button');
+          btn.type = 'button';
+          btn.className = 'profile-btn';
+          btn.dataset.id = p.id;
+          btn.innerHTML =
+            '<span class="profile-avatar">' + initial(p.display_name) + '</span>' +
+            '<span>' + escapeHtml(p.display_name) + '</span>';
+          btn.addEventListener('click', function () {
+            selectProfile(p.id, btn);
+          });
+          profileList.appendChild(btn);
+        });
+      }
+
+      function selectProfile(id, btn) {
+        selectedProfileId = id;
+        hideError(errorMsg);
+
+        var buttons = profileList.querySelectorAll('.profile-btn');
+        for (var i = 0; i < buttons.length; i++) {
+          buttons[i].classList.remove('selected');
+        }
+        btn.classList.add('selected');
+
+        passphraseForm.classList.add('visible');
+        passphraseInput.value = '';
+        passphraseInput.focus();
+      }
+
+      function escapeHtml(str) {
+        var div = document.createElement('div');
+        div.textContent = str;
+        return div.innerHTML;
+      }
+
+      // Load profiles
+      fetch('api/auth/profiles')
+        .then(function (r) { return r.json(); })
+        .then(function (data) {
+          var list = Array.isArray(data) ? data : (data.profiles || []);
+          renderProfiles(list);
+        })
+        .catch(function () {
+          loading.textContent = 'Could not load profiles.';
+        });
+
+      // Login submit
+      passphraseForm.addEventListener('submit', function (e) {
+        e.preventDefault();
+        hideError(errorMsg);
+
+        var passphrase = passphraseInput.value;
+        if (!passphrase || !selectedProfileId) return;
+
+        var btn = passphraseForm.querySelector('.login-btn');
+        btn.disabled = true;
+        btn.textContent = 'Signing in\u2026';
+
+        fetch('api/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ profileId: selectedProfileId, passphrase: passphrase })
+        })
+          .then(function (r) { return r.json(); })
+          .then(function (data) {
+            if (data.ok) {
+              window.location.href = './';
+            } else {
+              showError(errorMsg, data.error || 'Login failed.');
+              btn.disabled = false;
+              btn.textContent = 'Sign in';
+            }
+          })
+          .catch(function () {
+            showError(errorMsg, 'Network error. Try again.');
+            btn.disabled = false;
+            btn.textContent = 'Sign in';
+          });
+      });
+
+      // Setup submit
+      setupForm.addEventListener('submit', function (e) {
+        e.preventDefault();
+        hideError(setupError);
+
+        var displayName = document.getElementById('setup-name').value.trim();
+        var passphrase = document.getElementById('setup-pass').value;
+        if (!displayName || !passphrase) return;
+
+        var btn = setupForm.querySelector('.login-btn');
+        btn.disabled = true;
+        btn.textContent = 'Creating\u2026';
+
+        fetch('api/auth/setup', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ displayName: displayName, passphrase: passphrase })
+        })
+          .then(function (r) { return r.json(); })
+          .then(function (data) {
+            if (data.ok) {
+              window.location.href = './';
+            } else {
+              showError(setupError, data.error || 'Setup failed.');
+              btn.disabled = false;
+              btn.textContent = 'Create profile';
+            }
+          })
+          .catch(function () {
+            showError(setupError, 'Network error. Try again.');
+            btn.disabled = false;
+            btn.textContent = 'Create profile';
+          });
+      });
+    })();
+  </script>
+
+</body>
+</html>

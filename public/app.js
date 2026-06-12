@@ -1,3 +1,77 @@
+// ── Profile ────────────────────────────────────────────────
+(async function initProfile() {
+  try {
+    const res = await fetch('api/auth/me');
+    if (res.status === 401) {
+      window.location.href = 'login.html';
+      return;
+    }
+    const profile = await res.json();
+    const nameEl = document.getElementById('profile-name');
+    if (nameEl) nameEl.textContent = profile.displayName;
+
+    if (!profile.immichConnected) {
+      document.getElementById('immich-setup-overlay').style.display = 'flex';
+    }
+  } catch {
+    // Profile check failed - app will still work if session is valid
+  }
+})();
+
+// ── Immich credential enrollment ───────────────────────────
+document.getElementById('immich-setup-form')?.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const errEl = document.getElementById('immich-setup-error');
+  const okEl = document.getElementById('immich-setup-success');
+  errEl.style.display = 'none';
+  okEl.style.display = 'none';
+
+  const apiKey = document.getElementById('immich-api-key').value.trim();
+  if (!apiKey) return;
+
+  const btn = e.target.querySelector('.setup-btn');
+  btn.disabled = true;
+  btn.textContent = 'Verifying\u2026';
+
+  try {
+    const res = await fetch('api/auth/immich-credential', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ apiKey }),
+    });
+    const data = await res.json();
+    if (data.ok) {
+      okEl.textContent = 'Connected as ' + (data.immichUserName || 'verified') + '. Reloading\u2026';
+      okEl.style.display = 'block';
+      setTimeout(() => window.location.reload(), 1200);
+    } else {
+      errEl.textContent = data.error || 'Verification failed.';
+      errEl.style.display = 'block';
+      btn.disabled = false;
+      btn.textContent = 'Verify & connect';
+    }
+  } catch {
+    errEl.textContent = 'Network error. Try again.';
+    errEl.style.display = 'block';
+    btn.disabled = false;
+    btn.textContent = 'Verify & connect';
+  }
+});
+
+document.getElementById('profile-menu-btn')?.addEventListener('click', (e) => {
+  e.stopPropagation();
+  document.getElementById('profile-menu').classList.toggle('hidden');
+});
+
+document.addEventListener('click', () => {
+  document.getElementById('profile-menu')?.classList.add('hidden');
+});
+
+document.getElementById('btn-logout')?.addEventListener('click', async () => {
+  await fetch('api/auth/logout', { method: 'POST' });
+  window.location.href = 'login.html';
+});
+
 /* ── PhotoDesk frontend — multi-pass photo review ───────────── */
 
 // ── SVG Icons ──────────────────────────────────────────────────

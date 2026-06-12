@@ -9,8 +9,94 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="styles.css" />
+<style>
+.header-right { display: flex; align-items: center; gap: 10px; }
+.profile-pill {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-dim);
+}
+.profile-menu-btn {
+  background: none; border: none; color: var(--text-ghost); cursor: pointer;
+  padding: 2px; display: grid; place-items: center; border-radius: 4px;
+}
+.profile-menu-btn:hover { color: var(--text); }
+.profile-menu {
+  position: absolute; top: 100%; right: 0; margin-top: 6px;
+  background: var(--panel-2); border: 1px solid var(--border);
+  border-radius: var(--r-md); padding: 4px; min-width: 120px;
+  box-shadow: var(--shadow-2); z-index: 100;
+}
+.profile-menu-item {
+  display: block; width: 100%; text-align: left;
+  background: none; border: none; color: var(--text-dim);
+  font: inherit; font-size: 13px; padding: 7px 10px;
+  border-radius: 4px; cursor: pointer;
+}
+.profile-menu-item:hover { background: var(--panel-3); color: var(--text); }
+
+/* ── Immich setup overlay ─────────────────────────────────── */
+.immich-setup-overlay {
+  position: fixed; inset: 0; z-index: 200;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(0,0,0,.7);
+}
+.immich-setup-card {
+  width: 100%; max-width: 420px; margin: 24px;
+  background: var(--bg); border: 1px solid var(--border);
+  border-radius: var(--r-lg); padding: 36px 28px 32px;
+  box-shadow: var(--shadow-3);
+}
+.immich-setup-card h2 { font-size: 18px; font-weight: 600; margin: 0 0 6px; }
+.immich-setup-card p { font-size: 13px; color: var(--text-dim); line-height: 1.5; margin: 0 0 18px; }
+.immich-setup-card .form-label { font-size: 13px; font-weight: 500; color: var(--text-dim); display: block; margin-bottom: 4px; }
+.immich-setup-card .form-input {
+  width: 100%; padding: 10px 12px; background: var(--panel);
+  border: 1px solid var(--border); border-radius: var(--r-md);
+  color: var(--text); font-family: var(--mono); font-size: 13px;
+  outline: none; box-sizing: border-box;
+}
+.immich-setup-card .form-input:focus { border-color: var(--accent); }
+.immich-setup-card .setup-btn {
+  margin-top: 14px; width: 100%; padding: 10px 0;
+  background: var(--accent); border: none; border-radius: var(--r-md);
+  color: var(--bg-deep); font-family: var(--sans); font-size: 15px;
+  font-weight: 600; cursor: pointer;
+}
+.immich-setup-card .setup-btn:hover { opacity: 0.88; }
+.immich-setup-card .setup-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.immich-setup-card .setup-error {
+  margin-top: 10px; padding: 8px 10px; background: var(--reject-dim);
+  border: 1px solid var(--reject); border-radius: var(--r-md);
+  color: var(--reject); font-size: 13px; display: none;
+}
+.immich-setup-card .setup-success {
+  margin-top: 10px; padding: 8px 10px; background: rgba(46,204,113,.1);
+  border: 1px solid rgba(46,204,113,.5); border-radius: var(--r-md);
+  color: #2ecc71; font-size: 13px; display: none;
+}
+</style>
 </head>
 <body>
+
+  <!-- Immich API key enrollment (shown when profile has no Immich key) -->
+  <div id="immich-setup-overlay" class="immich-setup-overlay" style="display:none;">
+    <div class="immich-setup-card">
+      <h2>Connect to Immich</h2>
+      <p>Paste your Immich API key so PhotoDesk can access your photo library. You can generate one in Immich under Account Settings &rarr; API Keys.</p>
+      <form id="immich-setup-form" autocomplete="off">
+        <label class="form-label" for="immich-api-key">API Key</label>
+        <input class="form-input" id="immich-api-key" name="apiKey" type="password" placeholder="Paste your Immich API key" required />
+        <div id="immich-setup-error" class="setup-error"></div>
+        <div id="immich-setup-success" class="setup-success"></div>
+        <button class="setup-btn" type="submit">Verify &amp; connect</button>
+      </form>
+    </div>
+  </div>
 
   <!-- LIBRARY / DISCOVER SCREEN -->
   <div id="screen-home" class="screen active">
@@ -23,9 +109,20 @@
         </span>
         <span>Photo<span>Desk</span></span>
       </div>
-      <div id="immich-status" class="connection-pill">
-        <span class="connection-dot"></span>
-        Immich · <span class="mono connection-label">checking</span>
+      <div class="header-right">
+        <div id="profile-pill" class="profile-pill">
+          <span id="profile-name"></span>
+          <button id="profile-menu-btn" class="profile-menu-btn" aria-label="Profile menu">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 9l6 6 6-6"/></svg>
+          </button>
+          <div id="profile-menu" class="profile-menu hidden">
+            <button id="btn-logout" class="profile-menu-item">Sign out</button>
+          </div>
+        </div>
+        <div id="immich-status" class="connection-pill">
+          <span class="connection-dot"></span>
+          Immich · <span class="mono connection-label">checking</span>
+        </div>
       </div>
     </header>
 

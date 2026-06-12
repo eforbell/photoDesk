@@ -7,6 +7,27 @@ CREATE TABLE schema_migrations (
   applied_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+CREATE TABLE profiles (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  display_name TEXT NOT NULL UNIQUE,
+  role TEXT NOT NULL CHECK(role IN ('parent', 'kid')) DEFAULT 'kid',
+  passphrase_hash TEXT,
+  immich_url TEXT NOT NULL DEFAULT '',
+  immich_api_key TEXT,
+  immich_user_id TEXT,
+  immich_verified_at TEXT,
+  status TEXT NOT NULL CHECK(status IN ('active', 'disabled', 'setup')) DEFAULT 'setup',
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE auth_sessions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  token TEXT NOT NULL UNIQUE,
+  profile_id INTEGER NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+  expires_at TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 CREATE TABLE sessions (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   name TEXT NOT NULL,
@@ -18,7 +39,8 @@ CREATE TABLE sessions (
   date_to TEXT,
   scene_threshold INTEGER NOT NULL DEFAULT 30,
   committed INTEGER NOT NULL DEFAULT 0,
-  committed_at TEXT
+  committed_at TEXT,
+  profile_id INTEGER NOT NULL DEFAULT 1 REFERENCES profiles(id)
 );
 
 CREATE TABLE scenes (
@@ -54,13 +76,15 @@ CREATE TABLE stack_groups (
 );
 
 CREATE TABLE processed_assets (
-  asset_id TEXT PRIMARY KEY,
+  asset_id TEXT NOT NULL,
+  profile_id INTEGER NOT NULL REFERENCES profiles(id) DEFAULT 1,
   session_id INTEGER NOT NULL REFERENCES sessions(id),
-  committed_at TEXT NOT NULL DEFAULT (datetime('now'))
+  committed_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE(profile_id, asset_id)
 );
 
 CREATE TABLE density_cache (
-  id INTEGER PRIMARY KEY CHECK (id = 1),
+  profile_id INTEGER NOT NULL UNIQUE REFERENCES profiles(id),
   computed_at TEXT NOT NULL,
   data TEXT NOT NULL
 );
@@ -119,3 +143,6 @@ CREATE INDEX idx_edits_session ON edits(session_id);
 CREATE INDEX idx_edits_status ON edits(render_status);
 CREATE INDEX idx_commit_actions_session ON commit_actions(session_id, status);
 CREATE INDEX idx_commit_runs_session ON commit_runs(session_id, started_at);
+CREATE INDEX idx_auth_sessions_token ON auth_sessions(token);
+CREATE INDEX idx_auth_sessions_expires ON auth_sessions(expires_at);
+CREATE INDEX idx_processed_assets_profile ON processed_assets(profile_id);

@@ -1,19 +1,27 @@
 const config = require('./config');
 
-function headers() {
+function resolveUrl(credentials) {
+  return (credentials && credentials.immichUrl) || config.immichUrl;
+}
+
+function resolveKey(credentials) {
+  return (credentials && credentials.apiKey) || config.immichApiKey;
+}
+
+function headers(credentials) {
   return {
-    'x-api-key': config.immichApiKey,
+    'x-api-key': resolveKey(credentials),
     'Content-Type': 'application/json',
   };
 }
 
-function authHeaders() {
-  return { 'x-api-key': config.immichApiKey };
+function authHeaders(credentials) {
+  return { 'x-api-key': resolveKey(credentials) };
 }
 
-async function getCurrentUser() {
-  const res = await fetch(`${config.immichUrl}/api/users/me`, {
-    headers: authHeaders(),
+async function getCurrentUser(credentials) {
+  const res = await fetch(`${resolveUrl(credentials)}/api/users/me`, {
+    headers: authHeaders(credentials),
   });
   if (!res.ok) {
     const text = await res.text();
@@ -22,7 +30,7 @@ async function getCurrentUser() {
   return res.json();
 }
 
-async function searchAssets({ page = 1, size = 250, dateFrom, dateTo } = {}) {
+async function searchAssets({ page = 1, size = 250, dateFrom, dateTo } = {}, credentials) {
   const body = {
     page,
     size,
@@ -33,9 +41,9 @@ async function searchAssets({ page = 1, size = 250, dateFrom, dateTo } = {}) {
   if (dateFrom) body.takenAfter = dateFrom;
   if (dateTo) body.takenBefore = dateTo;
 
-  const res = await fetch(`${config.immichUrl}/api/search/metadata`, {
+  const res = await fetch(`${resolveUrl(credentials)}/api/search/metadata`, {
     method: 'POST',
-    headers: headers(),
+    headers: headers(credentials),
     body: JSON.stringify(body),
   });
 
@@ -47,12 +55,12 @@ async function searchAssets({ page = 1, size = 250, dateFrom, dateTo } = {}) {
   return res.json();
 }
 
-async function fetchAllAssets({ dateFrom, dateTo } = {}) {
+async function fetchAllAssets({ dateFrom, dateTo } = {}, credentials) {
   const allAssets = [];
   let page = 1;
 
   while (true) {
-    const data = await searchAssets({ page, size: 250, dateFrom, dateTo });
+    const data = await searchAssets({ page, size: 250, dateFrom, dateTo }, credentials);
     const items = data.assets && data.assets.items ? data.assets.items : [];
     allAssets.push(...items);
 
@@ -64,23 +72,23 @@ async function fetchAllAssets({ dateFrom, dateTo } = {}) {
   return allAssets;
 }
 
-async function fetchOwnedAssets(options = {}) {
+async function fetchOwnedAssets(options = {}, credentials) {
   const [user, assets] = await Promise.all([
-    getCurrentUser(),
-    fetchAllAssets(options),
+    getCurrentUser(credentials),
+    fetchAllAssets(options, credentials),
   ]);
   return assets.filter(asset => asset.ownerId === user.id);
 }
 
-async function checkConnection() {
-  await getCurrentUser();
+async function checkConnection(credentials) {
+  await getCurrentUser(credentials);
   return true;
 }
 
-async function getThumbnailBuffer(assetId) {
+async function getThumbnailBuffer(assetId, credentials) {
   const res = await fetch(
-    `${config.immichUrl}/api/assets/${assetId}/thumbnail?size=preview`,
-    { headers: { 'x-api-key': config.immichApiKey } }
+    `${resolveUrl(credentials)}/api/assets/${assetId}/thumbnail?size=preview`,
+    { headers: authHeaders(credentials) }
   );
 
   if (!res.ok) {
@@ -92,10 +100,10 @@ async function getThumbnailBuffer(assetId) {
   return { buffer, contentType };
 }
 
-async function getOriginalAssetBuffer(assetId) {
+async function getOriginalAssetBuffer(assetId, credentials) {
   const res = await fetch(
-    `${config.immichUrl}/api/assets/${assetId}/original`,
-    { headers: { 'x-api-key': config.immichApiKey } }
+    `${resolveUrl(credentials)}/api/assets/${assetId}/original`,
+    { headers: authHeaders(credentials) }
   );
 
   if (!res.ok) {
@@ -110,9 +118,9 @@ async function getOriginalAssetBuffer(assetId) {
   };
 }
 
-async function getAssetInfo(assetId) {
-  const res = await fetch(`${config.immichUrl}/api/assets/${assetId}`, {
-    headers: authHeaders(),
+async function getAssetInfo(assetId, credentials) {
+  const res = await fetch(`${resolveUrl(credentials)}/api/assets/${assetId}`, {
+    headers: authHeaders(credentials),
   });
 
   if (!res.ok) {
@@ -123,9 +131,9 @@ async function getAssetInfo(assetId) {
   return res.json();
 }
 
-async function assetExists(assetId) {
-  const res = await fetch(`${config.immichUrl}/api/assets/${assetId}`, {
-    headers: authHeaders(),
+async function assetExists(assetId, credentials) {
+  const res = await fetch(`${resolveUrl(credentials)}/api/assets/${assetId}`, {
+    headers: authHeaders(credentials),
   });
   if (res.status === 404) return false;
   if (!res.ok) {
@@ -142,7 +150,7 @@ async function uploadAsset({
   deviceId = 'photodesk',
   fileCreatedAt,
   fileModifiedAt,
-}) {
+}, credentials) {
   const form = new FormData();
   form.append('assetData', new Blob([buffer], { type: 'image/jpeg' }), filename);
   form.append('deviceAssetId', deviceAssetId);
@@ -151,9 +159,9 @@ async function uploadAsset({
   form.append('fileModifiedAt', fileModifiedAt);
   form.append('filename', filename);
 
-  const res = await fetch(`${config.immichUrl}/api/assets`, {
+  const res = await fetch(`${resolveUrl(credentials)}/api/assets`, {
     method: 'POST',
-    headers: authHeaders(),
+    headers: authHeaders(credentials),
     body: form,
   });
 
@@ -165,14 +173,14 @@ async function uploadAsset({
   return res.json();
 }
 
-async function createStack(assetIds) {
+async function createStack(assetIds, credentials) {
   if (!assetIds || assetIds.length < 2) {
     throw new Error('createStack requires at least 2 asset IDs');
   }
 
-  const res = await fetch(`${config.immichUrl}/api/stacks`, {
+  const res = await fetch(`${resolveUrl(credentials)}/api/stacks`, {
     method: 'POST',
-    headers: headers(),
+    headers: headers(credentials),
     body: JSON.stringify({ assetIds }),
   });
 
@@ -184,12 +192,12 @@ async function createStack(assetIds) {
   return res.json();
 }
 
-async function copyStackAssociation(sourceId, targetId) {
+async function copyStackAssociation(sourceId, targetId, credentials) {
   // Immich's stable asset-copy API can copy stack membership. StackUpdateDto
   // only supports changing primaryAssetId, so it cannot append an asset.
-  const res = await fetch(`${config.immichUrl}/api/assets/copy`, {
+  const res = await fetch(`${resolveUrl(credentials)}/api/assets/copy`, {
     method: 'PUT',
-    headers: headers(),
+    headers: headers(credentials),
     body: JSON.stringify({
       sourceId,
       targetId,
@@ -203,22 +211,22 @@ async function copyStackAssociation(sourceId, targetId) {
   }
 }
 
-async function stackEditedAsset(originalAssetId, editedAssetId) {
-  const original = await getAssetInfo(originalAssetId);
+async function stackEditedAsset(originalAssetId, editedAssetId, credentials) {
+  const original = await getAssetInfo(originalAssetId, credentials);
   if (original.stack) {
-    await copyStackAssociation(originalAssetId, editedAssetId);
+    await copyStackAssociation(originalAssetId, editedAssetId, credentials);
     return { existingStack: true, stackId: original.stack.id };
   }
-  const stack = await createStack([originalAssetId, editedAssetId]);
+  const stack = await createStack([originalAssetId, editedAssetId], credentials);
   return { existingStack: false, stackId: stack.id };
 }
 
-async function trashAssets(ids) {
+async function trashAssets(ids, credentials) {
   if (!ids || ids.length === 0) return;
 
-  const res = await fetch(`${config.immichUrl}/api/assets`, {
+  const res = await fetch(`${resolveUrl(credentials)}/api/assets`, {
     method: 'DELETE',
-    headers: headers(),
+    headers: headers(credentials),
     body: JSON.stringify({ ids, force: false }),
   });
 
@@ -232,10 +240,10 @@ async function trashAssets(ids) {
   return res.json();
 }
 
-async function updateAssetRating(assetId, rating) {
-  const res = await fetch(`${config.immichUrl}/api/assets/${assetId}`, {
+async function updateAssetRating(assetId, rating, credentials) {
+  const res = await fetch(`${resolveUrl(credentials)}/api/assets/${assetId}`, {
     method: 'PUT',
-    headers: headers(),
+    headers: headers(credentials),
     body: JSON.stringify({ rating }),
   });
 
