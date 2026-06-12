@@ -64,7 +64,7 @@ function sessionMiddleware(db) {
   return (req, res, next) => {
     const token = parseCookie(req.headers.cookie, COOKIE_NAME);
     const profile = validateSession(db, token);
-    if (profile && profile.status === 'active') {
+    if (profile && profile.status !== 'disabled') {
       req.profile = profile;
     }
     next();

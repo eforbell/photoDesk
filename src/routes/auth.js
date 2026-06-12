@@ -14,6 +14,7 @@ const {
   requireAuth,
   requireParent,
 } = require('../auth');
+const { invalidateLibraryCache } = require('../library');
 
 router.get('/profiles', (req, res) => {
   const db = getDb();
@@ -126,6 +127,7 @@ router.post('/immich-credential', requireAuth, async (req, res) => {
           status = 'active'
       WHERE id = ?
     `).run(trimmedKey, immichUser.id, req.profile.id);
+    invalidateLibraryCache(db, req.profile.id);
     res.json({
       ok: true,
       immichUserName: immichUser.name || immichUser.email,

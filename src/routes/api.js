@@ -41,8 +41,9 @@ const {
 
 function profileCredentials(req) {
   if (!req.profile) return undefined;
+  if (!req.profile.immich_api_key) return undefined;
   return {
-    apiKey: req.profile.immich_api_key || config.immichApiKey,
+    apiKey: req.profile.immich_api_key,
     immichUrl: req.profile.immich_url || config.immichUrl,
   };
 }
