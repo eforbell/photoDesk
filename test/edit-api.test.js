@@ -29,7 +29,9 @@ global.fetch = async (url, options) => {
 
 const crypto = require('crypto');
 const app = require('../src/app');
+const config = require('../src/config');
 const { getDb } = require('../src/db');
+const { resetHeicCapability } = require('../src/heic-decoder');
 
 let server;
 let baseUrl;
@@ -253,6 +255,9 @@ test('failed re-renders preserve the previous ready derivative and recipe', asyn
 
 test('HEIC mode off preserves the previous ready derivative without attempting decode', async () => {
   originalFailure = null;
+  const previousMode = config.heicDecodeMode;
+  config.heicDecodeMode = 'off';
+  resetHeicCapability();
   const db = getDb();
   const scene = db.prepare('SELECT asset_ids FROM scenes WHERE session_id = 1').get();
   const assets = JSON.parse(scene.asset_ids);
@@ -284,6 +289,8 @@ test('HEIC mode off preserves the previous ready derivative without attempting d
     assert.equal(body.edit.rendered_path, previous.rendered_path);
     assert.deepEqual(fs.readFileSync(previousFile), previousBytes);
   } finally {
+    config.heicDecodeMode = previousMode;
+    resetHeicCapability();
     assets[0].originalFileName = 'asset-1.jpg';
     db.prepare('UPDATE scenes SET asset_ids = ? WHERE session_id = 1')
       .run(JSON.stringify(assets));

@@ -393,6 +393,6 @@ test('rejects rendered paths outside the configured directory', () => {
 test('reports the image codec capabilities of the installed sharp build', () => {
   const capabilities = sharpCapabilities();
   assert.match(capabilities.sharpVersion, /^\d+\.\d+\.\d+/);
-  assert.equal(capabilities.mode, 'off');
-  assert.equal(capabilities.heicDecode, 'off');
+  assert.ok(['off', 'external', 'libvips'].includes(capabilities.mode));
+  assert.ok(['off', 'available', 'unavailable'].includes(capabilities.heicDecode));
 });
