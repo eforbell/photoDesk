@@ -240,3 +240,7 @@
   - Editing profile and intensity are useful transient provenance but would duplicate the durable adjustment recipe if stored.
   - Supporting Flip requires validating the generated orientation (`9:16`), not only the aspect chips initially shown.
   - Browser interaction is essential for crop tooling because pointer capture, mobile scrolling, sticky actions, and contain-fit geometry are not proven by pure crop math alone.
+## 2026-06-15 — Feature #7 production validation
+- Enabled `PHOTODESK_HEIC_DECODE=external` on HomeServer without setting `PHOTODESK_HEIC_DECODER_CMD`; systemd/PATH discovery found vips successfully.
+- Edited a real iPhone HEIC, rendered the derivative, uploaded it back to Immich, and confirmed the uploaded result.
+- This closes the external-mode target-host validation gap. The runtime accepts only `off` and `external`; any in-process global-libvips mode is a separate future feature.

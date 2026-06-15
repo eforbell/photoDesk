@@ -2,15 +2,17 @@
   "branchName": "feature/7-heic-support",
   "projectName": "PhotoDesk",
   "status": "proposed",
-  "detailLevel": "actionable. HEIC decode is an explicit operator choice via env toggle, default off. Both decode strategies (A and B) are supported as selectable modes rather than a one-time fork; the only sequencing decision is which mode to implement first.",
-  "description": "Give PhotoDesk the ability to actually decode and edit iPhone HEIC originals on the Debian/Ubuntu production server, not just fail safely on them. Today the editor renders from the Immich /original buffer through the prebuilt Sharp binary (src/edit-renderer.js, src/routes/api.js). Sharp's prebuilt binaries intentionally omit HEIC/HEVC decode (patent-encumbered; only royalty-free AVIF/AV1 is bundled), so every iPhone HEIC original currently lands in the safe-failure path with a 'HEIC decode failed on this host' error. This feature provisions a real HEVC decode path on the target server, validates it against representative iPhone fixtures, and preserves the existing non-destructive, safe-failure guarantees as a hard constraint.",
+  "detailLevel": "actionable. HEIC decode is an explicit operator choice via env toggle, default off. This delivery supports off and the production-proven external vips mode; an in-process global-libvips mode is deferred to a separate future feature.",
+  "description": "Give PhotoDesk the ability to actually decode and edit iPhone HEIC originals on the HomeServer production host, not just fail safely on them. HomeServer runs Linux Mint 22.1 (xia) and hosts both PhotoDesk and Immich. Today the editor renders from the Immich /original buffer through the prebuilt Sharp binary (src/edit-renderer.js, src/routes/api.js). Sharp's prebuilt binaries intentionally omit HEIC/HEVC decode (patent-encumbered; only royalty-free AVIF/AV1 is bundled), so every iPhone HEIC original currently lands in the safe-failure path with a 'HEIC decode failed on this host' error. This feature provisions a real HEVC decode path on the target host, validates it against representative iPhone fixtures, and preserves the existing non-destructive, safe-failure guarantees as a hard constraint.",
   "designReference": "No new UI surface. The existing editor, EDITED badge, and the render_error display path (src/routes/api.js HEIC branch) are reused. Any new copy must use the shipped dark-only tokens and Review language.",
-  "targetPlatform": "Debian/Ubuntu server (git-deploy + systemd per deploy/ and planning/database-and-deployment.md). The local dev machine is NOT the target and its installed libs must not be assumed. x64 glibc is the primary arch; ARM64 should be kept buildable but is secondary.",
+  "targetPlatform": "HomeServer: Linux Mint 22.1 (xia), running PhotoDesk and Immich through the existing git-deploy + systemd flow documented in deploy/ and planning/database-and-deployment.md. HomeServer is the authoritative production target and its real installed tooling may be used for production validation. The current development checkout runs on macOS with Homebrew vips 8.18.3; local results are useful for development but do not replace validation on HomeServer. Generic Debian-family portability remains desirable but is secondary. x64 glibc is the primary production arch; macOS development and ARM64 builds must not be assumed to match production behavior.",
   "knownTargetFacts": [
-    "PROD Ubuntu host has apt libvips-tools at vips-8.15.1 (confirmed via `vips --version`).",
+    "HomeServer (Linux Mint 22.1 xia) has apt libvips-tools at vips-8.15.1 (confirmed via `vips --version`).",
+    "The current development host is macOS with Homebrew vips 8.18.3. Its library version and build features differ from HomeServer, so successful local decode or integration tests are not production capability evidence.",
     "Implication for libvips mode: 8.15.1 is below Sharp 0.34's required libvips (~8.17), so libvips mode REQUIRES a from-source libvips build. This is settled, not speculative.",
-    "External mode is PROVEN on PROD with zero extra packages. `vips -l | grep heif` showed heifload compiled in, and `vips copy IMG_0001.heic IMG_0001.tif` on a real iPhone HEIC succeeded: a 1.3MB HEVC-coded HEIC decoded to a 36MB uncompressed TIFF, confirming the HEVC decoder is wired into the apt vips. No libheif-plugin-libde265/libde265 install was needed.",
-    "Net recommendation is now firm: implement off + external first; external requires no new packages on the current PROD host. libvips mode remains optional/later and is the only path needing a from-source build."
+    "External mode is PROVEN on HomeServer with zero extra packages. `vips -l | grep heif` showed heifload compiled in, and `vips copy IMG_0001.heic IMG_0001.tif` on a real iPhone HEIC succeeded: a 1.3MB HEVC-coded HEIC decoded to a 36MB uncompressed TIFF, confirming the HEVC decoder is wired into the installed apt vips. No libheif-plugin-libde265/libde265 install was needed.",
+    "End-to-end external mode is PROVEN on HomeServer with PATH auto-discovery and only PHOTODESK_HEIC_DECODE=external configured: an iPhone HEIC was edited, rendered, uploaded to Immich, and the uploaded result was confirmed.",
+    "Net recommendation is now firm: implement off + external first; external requires no new packages on HomeServer. libvips mode remains optional/later and is the only path needing a from-source build."
   ],
   "rootCause": "Sharp prebuilt input formats are JPEG/PNG/WebP/AVIF/TIFF/GIF/SVG only; HEIC is excluded by design. Decoding iPhone HEIC (HEVC-coded) requires libvips compiled with libheif + an HEVC decoder (libde265). The current host 'advertises HEIF input' (libheif present for the AVIF/HEIF container) but cannot decode HEVC, which is exactly the observed 11.6003 failure.",
   "principles": [
@@ -19,7 +21,7 @@
     "Decode fidelity must be full-resolution. Rendering edits from Immich's downsized preview (getThumbnailBuffer, size=preview) is not an acceptable primary path; it may only exist as an explicitly-labeled degraded fallback if at all.",
     "Capability must be proven by a real decode, never inferred from sharp.format metadata. progress.txt already records this lesson: codec presence is not proof of decodability.",
     "Originals are never mutated; edited derivatives remain JPEG, stacked into Immich on Commit, consistent with Feature 3/4.",
-    "Deployment must stay reproducible on a vanilla Debian/Ubuntu server via the existing git-deploy + systemd flow. A maintainer should be able to reproduce a working HEIC host from documentation alone.",
+    "Deployment must stay reproducible on HomeServer's Linux Mint 22.1 environment via the existing git-deploy + systemd flow. A maintainer should be able to reproduce the working HEIC setup from documentation alone; generic Debian-family notes are secondary and must not replace validation on HomeServer.",
     "EXIF capture metadata and correct display orientation must survive into the rendered JPEG derivative."
   ],
   "envToggles": {
@@ -27,9 +29,9 @@
     "vars": [
       {
         "name": "PHOTODESK_HEIC_DECODE",
-        "values": "off | external | libvips",
+        "values": "off | external",
         "default": "off",
-        "meaning": "off = current behavior, no decode attempted, HEIC originals report the actionable compatibility error. external = Approach B (out-of-process CLI decode). libvips = Approach A (in-process global libvips built with libheif/libde265)."
+        "meaning": "off = current behavior, no decode attempted. external = out-of-process system vips decode into a bounded temporary TIFF before the existing Sharp render pipeline."
       },
       {
         "name": "PHOTODESK_HEIC_DECODER_CMD",
@@ -43,38 +45,9 @@
   "openDecisions": [
     {
       "id": "DEC-FIRST-MODE",
-      "question": "Both modes are supported behind PHOTODESK_HEIC_DECODE; which is implemented first? (No longer a permanent A-vs-B fork.)",
-      "recommendation": "Implement 'off' (baseline, effectively already present) + 'external' (Approach B) first because it is apt-only and lowest-friction to stand up and test, then add 'libvips' (Approach A) as the high-fidelity in-process mode. Operator is comfortable with source builds, so 'libvips' is fully on the table as a first-class mode, not a fallback.",
-      "factualCorrection": "Earlier framing implied Approach B needs manual builds; it does not. On Ubuntu/Debian the CLI decoders are apt-only (heif-convert from libheif-examples + libheif-plugin-libde265 + libde265-0, or vips/vipsthumbnail from libvips-tools). Approach A is the one that requires a manual build, because Sharp 0.34 wants libvips ~8.17 while PROD's apt libvips is confirmed 8.15.1, so linking Sharp in-process needs a newer libvips compiled from source. B avoids this by using the apt libs only as standalone CLIs whose version need not match Sharp.",
-      "approachA": {
-        "name": "libvips mode: custom global libvips, Sharp built from source against it",
-        "how": "Build (or otherwise provide) libvips at or above Sharp's config.libvips minimum, compiled with libheif + libde265, reachable via pkg-config (vips-cpp). Install Sharp with SHARP_FORCE_GLOBAL_LIBVIPS=1 so it links the HEIC-capable libvips instead of the prebuilt binary. Selected via PHOTODESK_HEIC_DECODE=libvips.",
-        "pros": [
-          "Single in-process pipeline; no subprocess or temp intermediate.",
-          "Highest fidelity and simplest data flow at request time.",
-          "ICC/orientation handled entirely inside Sharp."
-        ],
-        "cons": [
-          "Requires a from-source libvips build (PROD's confirmed 8.15.1 is older than Sharp 0.34's ~8.17 requirement); acceptable to this operator but adds a build step to deploy.",
-          "Tighter coupling between Sharp version, Node ABI, and the built libvips; revalidate on Sharp/Node upgrades.",
-          "A broken/mismatched build silently falls back to the HEIC-incapable prebuilt unless the startup decode check catches it."
-        ]
-      },
-      "approachB": {
-        "name": "external mode: out-of-process CLI decode, then existing prebuilt-Sharp pipeline",
-        "how": "Keep the unmodified prebuilt Sharp. When source is HEIC, decode to a lossless intermediate (16-bit TIFF or PNG, ICC preserved) via an apt CLI (heif-convert or vips), then feed that intermediate into the existing renderEditBuffer adjustment/crop pipeline. Source EXIF capture metadata and orientation from Immich's asset-info API (getAssetInfo) rather than the intermediate, since TIFF/PNG may drop original EXIF. Selected via PHOTODESK_HEIC_DECODE=external.",
-        "pros": [
-          "Apt-only on Ubuntu/Debian; NO from-source build required.",
-          "No ABI coupling to Sharp; survives Sharp/Node/libvips upgrades.",
-          "Composes naturally with the P2 bounded-memory item (both go through temp files).",
-          "Subprocess cost is negligible at family-scale single-photo editing."
-        ],
-        "cons": [
-          "Adds a subprocess + temp file per HEIC edit (must clean up on abort/failure).",
-          "Two-step decode boundary requires care to avoid double-applying orientation (libheif auto-applies irot/imir on decode) and to carry ICC (iPhone HEIC is usually Display P3).",
-          "Depends on the decoder binary being present and on PATH or pinned via PHOTODESK_HEIC_DECODER_CMD."
-        ]
-      }
+      "question": "Which HEIC mode is delivered first?",
+      "decision": "Deliver off + external only. Global-libvips is deferred until a separate feature supplies reproducible source-build and deployment automation.",
+      "status": "decided"
     }
   ],
   "schemaPlan": {
@@ -86,7 +59,7 @@
       "id": "HEIC-001",
       "title": "HEIC decode mode env toggle, default off",
       "priority": "p0",
-      "summary": "Introduce PHOTODESK_HEIC_DECODE (off|external|libvips) and PHOTODESK_HEIC_DECODER_CMD so HEIC decode is an explicit, operator-selected behavior, with 'off' as the safe default.",
+      "summary": "Introduce PHOTODESK_HEIC_DECODE (off|external) and PHOTODESK_HEIC_DECODER_CMD with off as the safe default.",
       "acceptanceCriteria": [
         "src/config.js reads and validates the new env vars; an unknown value fails closed to 'off' with a logged warning.",
         "With PHOTODESK_HEIC_DECODE unset or off, no HEIC decode is attempted and behavior is byte-for-byte the current safe-failure path.",
@@ -98,15 +71,12 @@
     },
     {
       "id": "HEIC-002",
-      "title": "Server HEVC decode capability provisioned and documented per mode",
+      "title": "External server HEVC decode capability documented and verified",
       "priority": "p0",
-      "summary": "Make a clean Debian/Ubuntu server actually decode iPhone HEIC for each enabled mode, with copy-pasteable, repeatable setup in the deploy docs.",
+      "summary": "Keep HomeServer external-mode decoding reproducible with copy-pasteable setup and preflight checks.",
       "acceptanceCriteria": [
-        "Docs give the exact apt-only setup for external mode (heif-convert/libheif-examples + libheif-plugin-libde265 + libde265-0, or libvips-tools) on the pinned Debian/Ubuntu release.",
-        "Docs give the from-source libvips build steps for libvips mode (libvips at Sharp's config.libvips minimum, built with libheif/libde265, plus SHARP_FORCE_GLOBAL_LIBVIPS install).",
-        "Following the documented steps for whichever mode is enabled yields successful decode of a real iPhone HEIC fixture on a fresh server.",
-        "The deploy flow makes Sharp provisioning explicit so a deploy cannot silently regress to a HEIC-incapable Sharp when libvips mode is intended.",
-        "ARM64 setup is noted (working or explicitly deferred), not silently broken."
+        "Docs record HomeServer's exact external-mode setup: Linux Mint 22.1 (xia), vips 8.15.1, and the proven `vips copy` command, including verification commands for heifload and a real fixture.",
+        "Following the documented steps for whichever mode is enabled yields successful decode of a real iPhone HEIC fixture on a fresh server."
       ],
       "status": "proposed"
     },
@@ -148,7 +118,7 @@
       "acceptanceCriteria": [
         "When mode is off, decode capability is absent, or a HEIC decode throws, the original is never modified and any previous ready edit remains usable.",
         "The user sees the actionable HEIC compatibility error (existing render_error surface), not corrupt output.",
-        "A regression test covers both mode=off and an enabled-but-failing mode, asserting: previous-ready edit preserved, render_status/render_error correct, and a 422 with an actionable message — mirroring the current src/routes/api.js HEIC branch behavior."
+        "A regression test covers both mode=off and an enabled-but-failing mode, asserting: previous-ready edit preserved, render_status/render_error correct, and a 422 with an actionable message \u2014 mirroring the current src/routes/api.js HEIC branch behavior."
       ],
       "status": "proposed"
     },
@@ -158,8 +128,8 @@
       "priority": "p1",
       "summary": "Acquire and commit representative iPhone HEIC fixtures and add decode/orientation/metadata assertions.",
       "acceptanceCriteria": [
-        "At least one real iPhone HEIC fixture (HEVC-coded) is committed under test/ and used by HEIC-003 and the render tests.",
-        "A best-effort attempt is made to include the specific compression variant that previously reported 11.6003; if it cannot be obtained, that gap is documented as a known risk.",
+        "Small synthetic HEVC-coded fixtures are committed under test/ for fast startup and orientation checks.",
+        "A location-scrubbed real tiled iPhone HEIC approved for repository use is committed as test/fixtures/test.heic and used by integration tests, including coverage for files that exceed libheif's default item-reference security limit.",
         "A test asserts a rotated iPhone HEIC renders upright (orientation correctness), since HEIC orientation is a common silent-rotation bug.",
         "A test asserts the rendered derivative dimensions/crop bounds and deterministic file creation, consistent with the Feature 3 JPEG fixture test."
       ],
@@ -168,13 +138,11 @@
   ],
   "backendDependencies": [
     "Immich /original asset download (getOriginalAssetBuffer) and getAssetInfo (for EXIF/orientation) are already proxied server-side.",
-    "libvips mode: a libvips build with libheif + libde265 reachable via pkg-config; Sharp installed with SHARP_FORCE_GLOBAL_LIBVIPS (requires a from-source libvips build).",
     "external mode: an apt-provided libheif/libvips CLI decoder (heif-convert from libheif-examples, or vips/vipsthumbnail from libvips-tools) plus a temp-file working area; apt-only, no compile.",
     "PHOTODESK_EDIT_DIR remains the durable output location; any HEIC intermediate must use a temp area that is cleaned on success and failure."
   ],
   "researchNeeded": [
-    "Confirm the exact Sharp config.libvips minimum for the pinned Sharp version vs the libvips version in current Debian/Ubuntu stable (confirms the from-source libvips build needed for libvips mode).",
-    "For external mode: confirm which apt package provides a reliable HEVC decoder on the target (libheif-plugin-libde265 / libde265-0) and which CLI best preserves ICC + applies orientation predictably.",
+    "For external mode, the decoder availability question is settled on HomeServer: installed vips 8.15.1 successfully decodes the real iPhone fixture. Still verify ICC preservation and orientation behavior through the application pipeline.",
     "Determine whether iPhone HEIC EXIF/orientation is more reliably sourced from Immich getAssetInfo than from the decode boundary.",
     "Verify Immich upload/stack flow is unaffected by HEIC-derived JPEGs (should be identical to existing JPEG derivatives, but confirm)."
   ],
@@ -183,7 +151,8 @@
     "HEVC/HEIC ENCODE or writing HEIC output (we only decode; derivatives stay JPEG).",
     "Bounded-memory streaming rewrite (P2 item) beyond the temp-file hygiene that external mode naturally introduces.",
     "Any change to the editor UI/adjustment model.",
-    "Multi-arch/musl/Alpine support beyond keeping ARM64 buildable."
+    "Multi-arch/musl/Alpine support beyond keeping ARM64 buildable.",
+    "In-process global-libvips mode and its source-build provisioning; track as a separate future feature."
   ],
-  "implementationSlice": "Add the PHOTODESK_HEIC_DECODE off|external|libvips toggle defaulting to off (HEIC-001), provision + document each mode on the Debian/Ubuntu target (HEIC-002), prove the active mode with a real-fixture startup check that respects off (HEIC-003), integrate the mode-dispatched render path (HEIC-004), keep and regression-test safe-failure including off (HEIC-005), and lock it with committed iPhone fixtures (HEIC-006). Recommended first cut: off + external (apt-only); add libvips mode next."
+  "implementationSlice": "Ship PHOTODESK_HEIC_DECODE=off|external, prove external vips with real fixtures at startup/deploy, integrate bounded serialized decode into the render path, preserve safe failure and required Immich metadata, and validate on HomeServer."
 }

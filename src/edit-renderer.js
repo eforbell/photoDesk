@@ -2,16 +2,75 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const sharp = require('sharp');
+const config = require('./config');
+const {
+  decodeHeicBuffer,
+  getHeicCapability,
+  isHeicSource,
+} = require('./heic-decoder');
 
 function sharpCapabilities() {
   const heif = sharp.format.heif;
   return {
+    ...getHeicCapability(),
     sharpVersion: sharp.versions.sharp,
     libvipsVersion: sharp.versions.vips,
+    heifVersion: sharp.versions.heif || null,
     heifDecoder: Boolean(heif?.input?.buffer),
     heicGuaranteed: Boolean(heif?.input?.fileSuffix?.includes('.heic')),
-    heifVersion: sharp.versions.heif || null,
   };
+}
+
+function decimalDegrees(value, positiveRef, negativeRef) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return null;
+  const absolute = Math.abs(number);
+  const degrees = Math.floor(absolute);
+  const minutesFloat = (absolute - degrees) * 60;
+  const minutes = Math.floor(minutesFloat);
+  const seconds = Math.round((minutesFloat - minutes) * 60 * 10_000);
+  return {
+    ref: number < 0 ? negativeRef : positiveRef,
+    value: `${degrees}/1 ${minutes}/1 ${seconds}/10000`,
+  };
+}
+
+function exifDateTime(value) {
+  if (!value) return null;
+  const direct = String(value).match(
+    /^(\d{4})[-:](\d{2})[-:](\d{2})[ T](\d{2}):(\d{2}):(\d{2})/
+  );
+  if (direct) {
+    return `${direct[1]}:${direct[2]}:${direct[3]} ${direct[4]}:${direct[5]}:${direct[6]}`;
+  }
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  return date.toISOString().slice(0, 19).replace(
+    /^(\d{4})-(\d{2})-(\d{2})T/,
+    '$1:$2:$3 '
+  );
+}
+
+function immichExifMetadata(assetInfo) {
+  const exifInfo = assetInfo?.exifInfo || {};
+  const result = {};
+  const capturedAt = exifDateTime(
+    exifInfo.dateTimeOriginal || assetInfo?.fileCreatedAt
+  );
+  if (capturedAt) {
+    result.IFD2 = { DateTimeOriginal: capturedAt };
+  }
+  const latitude = decimalDegrees(exifInfo.latitude, 'N', 'S');
+  const longitude = decimalDegrees(exifInfo.longitude, 'E', 'W');
+  if (latitude && longitude) {
+    result.IFD3 = {
+      GPSLatitudeRef: latitude.ref,
+      GPSLatitude: latitude.value,
+      GPSLongitudeRef: longitude.ref,
+      GPSLongitude: longitude.value,
+    };
+  }
+  return Object.keys(result).length ? result : null;
 }
 
 function pixelCrop(crop, width, height) {
@@ -69,16 +128,19 @@ function overlaySvg(width, height, adjustments) {
   return overlays;
 }
 
-async function renderEditBuffer(input, adjustments, crop) {
+async function renderEditBuffer(input, adjustments, crop, {
+  inputAlreadyOriented = false,
+  exif = null,
+} = {}) {
   const metadata = await sharp(input).metadata();
-  const oriented = metadata.autoOrient || metadata;
+  const oriented = inputAlreadyOriented ? metadata : metadata.autoOrient || metadata;
   if (!oriented.width || !oriented.height) throw new Error('Source image dimensions are unavailable');
 
   const region = pixelCrop(crop, oriented.width, oriented.height);
   const values = adjustmentValues(adjustments);
-  let pipeline = sharp(input)
-    .autoOrient()
-    .extract(region)
+  let pipeline = sharp(input);
+  if (!inputAlreadyOriented) pipeline = pipeline.autoOrient();
+  pipeline = pipeline.extract(region)
     .modulate({
       brightness: values.brightness,
       saturation: values.saturation,
@@ -88,10 +150,48 @@ async function renderEditBuffer(input, adjustments, crop) {
   const overlays = overlaySvg(region.width, region.height, adjustments);
   if (overlays.length) pipeline = pipeline.composite(overlays);
 
-  return pipeline
-    .jpeg({ quality: 92, mozjpeg: true })
-    .withMetadata()
-    .toBuffer({ resolveWithObject: true });
+  pipeline = pipeline.jpeg({ quality: 92, mozjpeg: true });
+  pipeline = pipeline.withMetadata({
+    orientation: 1,
+    ...(exif ? { exif } : {}),
+  });
+  return pipeline.toBuffer({ resolveWithObject: true });
+}
+
+function heicUnavailableError(detail) {
+  const err = new Error(detail);
+  err.code = 'HEIC_DECODE_UNAVAILABLE';
+  return err;
+}
+
+async function prepareRenderSource(input, source = {}, { signal } = {}) {
+  if (!isHeicSource(source)) {
+    return { input, inputAlreadyOriented: false, exif: null };
+  }
+
+  const current = getHeicCapability();
+  if (config.heicDecodeMode === 'off') {
+    throw heicUnavailableError(
+      'HEIC decoding is off on this host. Set PHOTODESK_HEIC_DECODE=external after validating vips.'
+    );
+  }
+  if (current.mode !== config.heicDecodeMode || current.heicDecode !== 'available') {
+    throw heicUnavailableError(
+      current.detail || `HEIC ${config.heicDecodeMode} mode is unavailable on this host.`
+    );
+  }
+  if (config.heicDecodeMode === 'external') {
+    return {
+      input: await decodeHeicBuffer(input, { command: current.decoder, signal }),
+      inputAlreadyOriented: true,
+      exif: immichExifMetadata(source.assetInfo),
+    };
+  }
+  return {
+    input,
+    inputAlreadyOriented: false,
+    exif: immichExifMetadata(source.assetInfo),
+  };
 }
 
 function safeEditPath(editDir, relativePath) {
@@ -110,8 +210,16 @@ async function writeRenderedEdit({
   editDir,
   sessionId,
   assetId,
+  source,
+  signal,
 }) {
-  const result = await renderEditBuffer(input, adjustments, crop);
+  const prepared = await prepareRenderSource(input, source, { signal });
+  const result = await renderEditBuffer(
+    prepared.input,
+    adjustments,
+    crop,
+    prepared
+  );
   const relativePath = path.join(
     String(sessionId),
     `${assetId}-${crypto.randomUUID()}.jpg`
@@ -153,7 +261,9 @@ async function writeRenderedEdit({
 
 module.exports = {
   adjustmentValues,
+  immichExifMetadata,
   pixelCrop,
+  prepareRenderSource,
   renderEditBuffer,
   safeEditPath,
   sharpCapabilities,

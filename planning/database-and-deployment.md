@@ -30,10 +30,11 @@ Existing pre-migration dev databases are accepted only if they match the Feature
 1. fetch the requested ref from git
 2. update the deploy work tree
 3. install production dependencies with `npm ci --omit=dev`
-4. stop the running service
-5. back up the SQLite database
-6. run `npm run migrate`
-7. restart the systemd service
+4. validate the configured HEIC mode with `npm run check:heic`
+5. stop the running service
+6. back up the SQLite database
+7. run `npm run migrate`
+8. restart the systemd service
 
 Default production path and service name:
 
@@ -64,6 +65,53 @@ PHOTODESK_EDIT_DIR=/data/apps/photoDesk-data/edits
 ```
 
 The service user must be able to create directories and atomically replace files
-under that path. The installed `sharp` build reports codec support at
-`GET /api/edits/capabilities`; check that endpoint on the deployment host before
-depending on HEIC input.
+under that path.
+
+## HEIC decode modes
+
+HomeServer is the authoritative production target:
+
+- Linux Mint 22.1 (`xia`)
+- system vips 8.15.1
+- PhotoDesk and Immich run on the same host
+- `vips copy IMG_0001.heic IMG_0001.tif` successfully decoded a real iPhone
+  HEVC-coded HEIC without adding packages
+
+HEIC decoding defaults to disabled:
+
+```dotenv
+PHOTODESK_HEIC_DECODE=off
+```
+
+The supported first production mode is the standalone system vips:
+
+```dotenv
+PHOTODESK_HEIC_DECODE=external
+PHOTODESK_HEIC_DECODER_CMD=/usr/bin/vips
+```
+
+The command variable must be an absolute executable path. It may be omitted when
+`vips` is available on the service `PATH`.
+
+Verify HomeServer before deployment:
+
+```bash
+vips --version
+vips -l | grep heif
+npm run check:heic
+```
+
+`npm run check:heic` decodes the committed synthetic HEVC fixture through the
+same external adapter used at runtime. Automated integration tests also decode
+`test/fixtures/test.heic`, a location-scrubbed real tiled iPhone image approved
+for repository use. It verifies the `vips heifload --unlimited` path required
+when a modern HEIC exceeds libheif's default item-reference security limit.
+
+At runtime, an unavailable enabled decoder is logged and exposed by
+`GET /api/edits/capabilities`, but PhotoDesk continues serving non-HEIC edits.
+During deployment, the preflight exits non-zero before the service is stopped.
+Rollback is setting `PHOTODESK_HEIC_DECODE=off`.
+
+This delivery supports only `off` and `external`. A future in-process global
+libvips mode requires a separate feature with reproducible build and deployment
+steps; Sharp 0.34.5 requires libvips `>=8.17.3`, while HomeServer has 8.15.1.

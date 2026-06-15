@@ -104,10 +104,31 @@ async function getThumbnailBuffer(assetId, credentials) {
   return { buffer, contentType };
 }
 
-async function getOriginalAssetBuffer(assetId, credentials) {
+async function responseBuffer(res, maxBytes) {
+  const declared = Number(res.headers.get('content-length'));
+  if (maxBytes && Number.isFinite(declared) && declared > maxBytes) {
+    throw new Error(`Original HEIC exceeds the ${maxBytes}-byte safety limit`);
+  }
+  const chunks = [];
+  let size = 0;
+  for await (const chunk of res.body) {
+    size += chunk.length;
+    if (maxBytes && size > maxBytes) {
+      throw new Error(`Original HEIC exceeds the ${maxBytes}-byte safety limit`);
+    }
+    chunks.push(Buffer.from(chunk));
+  }
+  return Buffer.concat(chunks, size);
+}
+
+async function getOriginalAssetBuffer(assetId, credentials, {
+  signal,
+  maxBytes,
+  maxHeicBytes,
+} = {}) {
   const res = await fetch(
     `${resolveUrl(credentials)}/api/assets/${assetId}/original`,
-    { headers: authHeaders(credentials) }
+    { headers: authHeaders(credentials), signal }
   );
 
   if (!res.ok) {
@@ -115,16 +136,21 @@ async function getOriginalAssetBuffer(assetId, credentials) {
     throw new Error(`Original asset fetch failed: ${res.status} ${text}`);
   }
 
+  const contentType = res.headers.get('content-type') || 'application/octet-stream';
   return {
-    buffer: Buffer.from(await res.arrayBuffer()),
-    contentType: res.headers.get('content-type') || 'application/octet-stream',
+    buffer: await responseBuffer(
+      res,
+      maxBytes || (/^image\/hei[cf]$/i.test(contentType) ? maxHeicBytes : undefined)
+    ),
+    contentType,
     contentDisposition: res.headers.get('content-disposition') || '',
   };
 }
 
-async function getAssetInfo(assetId, credentials) {
+async function getAssetInfo(assetId, credentials, { signal } = {}) {
   const res = await fetch(`${resolveUrl(credentials)}/api/assets/${assetId}`, {
     headers: authHeaders(credentials),
+    signal,
   });
 
   if (!res.ok) {
@@ -274,4 +300,5 @@ module.exports = {
   trashAssets,
   updateAssetRating,
   checkConnection,
+  responseBuffer,
 };

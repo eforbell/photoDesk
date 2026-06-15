@@ -92,6 +92,9 @@ fi
 echo "==> Installing production dependencies"
 npm ci --omit=dev
 
+echo "==> Checking configured HEIC decode mode"
+npm run check:heic
+
 DB_PATH="$(node -e "
   require('dotenv').config();
   const path = require('path');
