@@ -36,6 +36,7 @@ feature concept. This is intentionally not designated as the next feature.
 
 **Priority:** P1  
 **Status:** Backlog
+**Feature concept:** [`features/feature-7-heic-support.json`](features/feature-7-heic-support.json)
 
 PhotoDesk currently detects HEIC render failures and preserves the original or
 last successful edit, but the packaged Sharp/libvips build on the development
