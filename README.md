@@ -109,6 +109,8 @@ IMMICH_API_KEY=your-api-key-here
 PORT=3400
 TZ=America/New_York
 PHOTODESK_EDIT_DIR=/durable/path/to/photodesk-edits
+PHOTODESK_HEIC_DECODE=off
+# PHOTODESK_HEIC_DECODER_CMD=/usr/bin/vips
 ```
 
 Then run:
@@ -131,6 +133,7 @@ npm run dev
 ```bash
 npm test
 npm run migrate
+PHOTODESK_HEIC_DECODE=off npm run check:heic
 ```
 
 The test suite covers migrations, discovery semantics, editor validation,
@@ -152,12 +155,38 @@ checkout path that deployment may replace. See
 [`planning/database-and-deployment.md`](planning/database-and-deployment.md)
 for the migration and deployment policy.
 
-## Known limitation
+## HEIC editing
 
-HEIC support depends on the Sharp/libvips/libheif build installed on the host.
-PhotoDesk detects unsupported iPhone HEIC variants and fails safely without
-altering originals or replacing a previous successful edit. Full HEIC
-compatibility is tracked in [`planning/backlog.md`](planning/backlog.md).
+HEIC decoding is an explicit operator choice and defaults to off:
+
+```dotenv
+PHOTODESK_HEIC_DECODE=off
+```
+
+HomeServer's supported first mode uses its standalone vips 8.15.1 CLI, which has
+already decoded a real iPhone HEIC:
+
+```dotenv
+PHOTODESK_HEIC_DECODE=external
+# Optional when vips is already on PATH:
+PHOTODESK_HEIC_DECODER_CMD=/usr/bin/vips
+```
+
+Validate the exact configured mode before restarting PhotoDesk:
+
+```bash
+npm run check:heic
+```
+
+The check decodes `test/fixtures/heic-probe.heic` through the same path used by
+the editor. Mode `off` skips probing. An enabled but unavailable decoder is
+reported without preventing normal non-HEIC editing at runtime; the deployment
+script treats the same result as a failed preflight and does not restart the
+service.
+
+External mode decodes into a private temporary TIFF, then reuses the existing
+Sharp crop/adjustment/JPEG pipeline. Originals remain untouched and failed
+re-renders preserve the previous ready derivative.
 
 ## Design and planning
 
@@ -165,4 +194,3 @@ The visual and interaction source of truth is
 [`design/design_handoff_photodesk/README.md`](design/design_handoff_photodesk/README.md).
 Development history, feature PRDs, and durable decisions are under
 [`planning/`](planning/).
-

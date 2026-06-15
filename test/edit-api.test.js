@@ -251,6 +251,45 @@ test('failed re-renders preserve the previous ready derivative and recipe', asyn
   assert.deepEqual(fs.readFileSync(renderedFile), previousBytes);
 });
 
+test('HEIC mode off preserves the previous ready derivative without attempting decode', async () => {
+  originalFailure = null;
+  const db = getDb();
+  const scene = db.prepare('SELECT asset_ids FROM scenes WHERE session_id = 1').get();
+  const assets = JSON.parse(scene.asset_ids);
+  assets[0].originalFileName = 'IMG_0001.HEIC';
+  db.prepare('UPDATE scenes SET asset_ids = ? WHERE session_id = 1')
+    .run(JSON.stringify(assets));
+
+  const previous = db.prepare(
+    'SELECT * FROM edits WHERE session_id = 1 AND asset_id = ?'
+  ).get('asset-1');
+  const previousFile = path.join(process.env.PHOTODESK_EDIT_DIR, previous.rendered_path);
+  const previousBytes = fs.readFileSync(previousFile);
+
+  try {
+    const response = await authFetch(`${baseUrl}/api/edits`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        sessionId: 1,
+        assetId: 'asset-1',
+        adjustments: { saturation: 20 },
+        crop: { aspect: 'Original' },
+      }),
+    });
+    assert.equal(response.status, 422);
+    const body = await response.json();
+    assert.match(body.error, /HEIC decoding is off/i);
+    assert.equal(body.edit.render_status, 'ready');
+    assert.equal(body.edit.rendered_path, previous.rendered_path);
+    assert.deepEqual(fs.readFileSync(previousFile), previousBytes);
+  } finally {
+    assets[0].originalFileName = 'asset-1.jpg';
+    db.prepare('UPDATE scenes SET asset_ids = ? WHERE session_id = 1')
+      .run(JSON.stringify(assets));
+  }
+});
+
 test('render failures do not expose local filesystem paths', async () => {
   originalFailure = new Error(`decoder failed while reading ${path.join(tempDir, 'secret-input.jpg')}`);
   const response = await authFetch(`${baseUrl}/api/edits`, {

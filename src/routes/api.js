@@ -38,6 +38,7 @@ const {
   sharpCapabilities,
   writeRenderedEdit,
 } = require('../edit-renderer');
+const { isHeicSource } = require('../heic-decoder');
 
 function profileCredentials(req) {
   if (!req.profile) return undefined;
@@ -735,7 +736,18 @@ router.post('/edits', async (req, res, next) => {
 
       let rendered;
       try {
-        const original = await getOriginalAssetBuffer(assetId, profileCredentials(req));
+        const assetMetadata = sessionAssetMetadata(db, sessionId, assetId) || {};
+        const heicSource = isHeicSource(assetMetadata);
+        const credentials = profileCredentials(req);
+        const [original, assetInfo] = await Promise.all([
+          getOriginalAssetBuffer(assetId, credentials),
+          heicSource && config.heicDecodeMode === 'external'
+            ? getAssetInfo(assetId, credentials).catch(err => {
+                console.warn('[edits] HEIC metadata lookup failed:', err.message);
+                return null;
+              })
+            : Promise.resolve(null),
+        ]);
         rendered = await writeRenderedEdit({
           input: original.buffer,
           adjustments,
@@ -743,6 +755,11 @@ router.post('/edits', async (req, res, next) => {
           editDir: config.editDir,
           sessionId,
           assetId,
+          source: {
+            ...assetMetadata,
+            contentType: original.contentType,
+            assetInfo,
+          },
         });
         db.prepare(`
           UPDATE edits
@@ -771,11 +788,11 @@ router.post('/edits', async (req, res, next) => {
             console.warn('[edits] Failed to remove incomplete render:', cleanupError.message);
           }
         }
-        const isHeic = /\.hei[cf]$/i.test(
-          sessionAssetMetadata(db, sessionId, assetId)?.originalFileName || ''
+        const isHeic = isHeicSource(
+          sessionAssetMetadata(db, sessionId, assetId) || {}
         );
         const detail = clientErrorMessage(err);
-        const message = isHeic && !sharpCapabilities().heicGuaranteed
+        const message = isHeic
           ? `HEIC decode failed on this host: ${detail}`
           : detail;
         if (previousEdit?.render_status === 'ready' && previousEdit.rendered_path) {

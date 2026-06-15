@@ -4,7 +4,14 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const sharp = require('sharp');
+const config = require('../src/config');
 const {
+  findExecutable,
+  initializeHeicCapability,
+  resetHeicCapability,
+} = require('../src/heic-decoder');
+const {
+  immichExifMetadata,
   pixelCrop,
   renderEditBuffer,
   safeEditPath,
@@ -151,6 +158,46 @@ test('applies off-center crop coordinates after EXIF auto-orientation', async ()
   assert.ok(stats.channels[2].mean < 30);
 });
 
+test('can skip orientation when an external decoder already oriented the pixels', async () => {
+  const input = await splitColorImage(120, 80)
+    .jpeg()
+    .withMetadata({ orientation: 6 })
+    .toBuffer();
+  const result = await renderEditBuffer(input, NEUTRAL, {
+    aspect: 'Original',
+    x: 0,
+    y: 0,
+    width: 1,
+    height: 1,
+  }, {
+    inputAlreadyOriented: true,
+  });
+  assert.equal(result.info.width, 120);
+  assert.equal(result.info.height, 80);
+  const metadata = await sharp(result.data).metadata();
+  assert.equal(metadata.orientation, 1);
+});
+
+test('maps Immich capture time and decimal GPS into writable EXIF values', () => {
+  assert.deepEqual(immichExifMetadata({
+    exifInfo: {
+      dateTimeOriginal: '2026-06-15T14:30:45.000Z',
+      latitude: 40.5,
+      longitude: -73.25,
+    },
+  }), {
+    IFD2: {
+      DateTimeOriginal: '2026:06:15 14:30:45',
+    },
+    IFD3: {
+      GPSLatitudeRef: 'N',
+      GPSLatitude: '40/1 30/1 0/10000',
+      GPSLongitudeRef: 'W',
+      GPSLongitude: '73/1 15/1 0/10000',
+    },
+  });
+});
+
 test('writes rendered files atomically inside the configured edit directory', async () => {
   const editDir = fs.mkdtempSync(path.join(os.tmpdir(), 'photodesk-edits-'));
   try {
@@ -180,6 +227,69 @@ test('writes rendered files atomically inside the configured edit directory', as
       path.basename(result.relativePath),
     ]);
   } finally {
+    fs.rmSync(editDir, { recursive: true, force: true });
+  }
+});
+
+test('external mode renders the committed HEVC fixture through system vips', {
+  skip: !findExecutable('vips'),
+}, async () => {
+  const previousMode = config.heicDecodeMode;
+  const previousCommand = config.heicDecoderCommand;
+  const editDir = fs.mkdtempSync(path.join(os.tmpdir(), 'photodesk-edits-'));
+  try {
+    config.heicDecodeMode = 'external';
+    config.heicDecoderCommand = findExecutable('vips');
+    await initializeHeicCapability({
+      mode: 'external',
+      decoderCommand: config.heicDecoderCommand,
+    });
+    const result = await writeRenderedEdit({
+      input: fs.readFileSync(path.join(__dirname, 'fixtures', 'heic-probe.heic')),
+      adjustments: NEUTRAL,
+      crop: { aspect: 'Original', x: 0, y: 0, width: 1, height: 1 },
+      editDir,
+      sessionId: 12,
+      assetId: 'heic-asset',
+      source: {
+        originalFileName: 'probe.heic',
+        contentType: 'image/heic',
+        assetInfo: {
+          exifInfo: {
+            dateTimeOriginal: '2026-06-15T14:30:45.000Z',
+          },
+        },
+      },
+    });
+    assert.equal(result.width, 32);
+    assert.equal(result.height, 24);
+    const metadata = await sharp(path.join(editDir, result.relativePath)).metadata();
+    assert.equal(metadata.orientation, 1);
+
+    const rotated = await writeRenderedEdit({
+      input: fs.readFileSync(
+        path.join(__dirname, 'fixtures', 'heic-probe-rotated.heic')
+      ),
+      adjustments: NEUTRAL,
+      crop: { aspect: 'Original', x: 0, y: 0, width: 1, height: 1 },
+      editDir,
+      sessionId: 12,
+      assetId: 'heic-rotated',
+      source: {
+        originalFileName: 'probe-rotated.heic',
+        contentType: 'image/heic',
+      },
+    });
+    assert.equal(rotated.width, 80);
+    assert.equal(rotated.height, 120);
+    const rotatedMetadata = await sharp(
+      path.join(editDir, rotated.relativePath)
+    ).metadata();
+    assert.equal(rotatedMetadata.orientation, 1);
+  } finally {
+    config.heicDecodeMode = previousMode;
+    config.heicDecoderCommand = previousCommand;
+    resetHeicCapability();
     fs.rmSync(editDir, { recursive: true, force: true });
   }
 });
@@ -268,6 +378,6 @@ test('rejects rendered paths outside the configured directory', () => {
 test('reports the image codec capabilities of the installed sharp build', () => {
   const capabilities = sharpCapabilities();
   assert.match(capabilities.sharpVersion, /^\d+\.\d+\.\d+/);
-  assert.equal(typeof capabilities.heifDecoder, 'boolean');
-  assert.equal(typeof capabilities.heicGuaranteed, 'boolean');
+  assert.equal(capabilities.mode, 'off');
+  assert.equal(capabilities.heicDecode, 'off');
 });
