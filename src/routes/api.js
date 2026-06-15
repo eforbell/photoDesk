@@ -747,6 +747,8 @@ router.post('/edits', async (req, res, next) => {
         const credentials = profileCredentials(req);
         const original = await getOriginalAssetBuffer(assetId, credentials, {
           signal: abortController.signal,
+          maxBytes: isHeicSource(assetMetadata) ? 50 * 1024 * 1024 : undefined,
+          maxHeicBytes: 50 * 1024 * 1024,
         });
         renderSourceIsHeic = isHeicSource({
           ...assetMetadata,

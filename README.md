@@ -192,7 +192,8 @@ libheif's default item-reference limit; this override is restricted to
 authenticated Immich originals, not arbitrary public uploads. PhotoDesk
 serializes HEIC decodes, limits source files to 50 MiB and decoded TIFFs to
 256 MiB, constrains vips to one worker, and aborts the subprocess when the
-client disconnects.
+client disconnects. Both limits are enforced while bytes are being downloaded
+or written, rather than only after the operation completes.
 
 ## Design and planning
 

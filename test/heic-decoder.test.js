@@ -13,6 +13,7 @@ const {
   isHeicSource,
   probeHeicCapability,
   resetHeicCapability,
+  runDecoderProcess,
 } = require('../src/heic-decoder');
 
 const fixturePath = path.join(__dirname, 'fixtures', 'heic-probe.heic');
@@ -109,18 +110,21 @@ test('decode rejects oversized TIFF output and cleans temporary files', async ()
 
 test('decode forwards abort signals to the decoder process', async () => {
   const controller = new AbortController();
-  controller.abort();
+  let started = false;
   await assert.rejects(
     decodeHeicBuffer(Buffer.from('fake-heic'), {
       command: '/usr/bin/vips',
       signal: controller.signal,
       execFileImpl: async (_command, _args, options) => {
+        started = true;
         assert.equal(options.signal, controller.signal);
-        throw controller.signal.reason;
+        controller.abort(new Error('decoder aborted'));
+        options.signal.throwIfAborted();
       },
     }),
     /abort/i
   );
+  assert.equal(started, true);
 });
 
 test('external HEIC decodes are globally serialized', async () => {
@@ -141,6 +145,64 @@ test('external HEIC decodes are globally serialized', async () => {
     decodeHeicBuffer(Buffer.from('second'), { command: '/usr/bin/vips', execFileImpl }),
   ]);
   assert.equal(peak, 1);
+});
+
+test('queued HEIC decode aborts without waiting for the active decode', async () => {
+  let releaseFirst;
+  const firstStarted = new Promise(resolve => {
+    releaseFirst = resolve;
+  });
+  let unblockFirst;
+  const firstBlocked = new Promise(resolve => {
+    unblockFirst = resolve;
+  });
+  const tiff = await sharp({
+    create: { width: 2, height: 2, channels: 3, background: '#000' },
+  }).tiff().toBuffer();
+  const first = decodeHeicBuffer(Buffer.from('first'), {
+    command: '/usr/bin/vips',
+    execFileImpl: async (_command, args) => {
+      releaseFirst();
+      await firstBlocked;
+      await fs.promises.writeFile(args[2], tiff);
+    },
+  });
+  await firstStarted;
+  const controller = new AbortController();
+  const second = decodeHeicBuffer(Buffer.from('second'), {
+    command: '/usr/bin/vips',
+    signal: controller.signal,
+    execFileImpl: async () => {
+      throw new Error('queued decoder should not start');
+    },
+  });
+  controller.abort(new Error('queued decode aborted'));
+  await assert.rejects(second, /queued decode aborted/);
+  unblockFirst();
+  await first;
+});
+
+test('decoder process is killed while oversized output is still being written', async () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'photodesk-process-test-'));
+  const outputPath = path.join(tempDir, 'growing.tif');
+  try {
+    await assert.rejects(runDecoderProcess(process.execPath, [
+      '-e',
+      `const fs=require('fs');const p=process.argv[1];`
+        + `const chunk=Buffer.alloc(1024*1024);`
+        + `const timer=setInterval(()=>fs.appendFileSync(p,chunk),5);`
+        + `process.on('SIGTERM',()=>{clearInterval(timer);process.exit(1)});`,
+      outputPath,
+    ], {
+      outputPath,
+      maxOutputBytes: 2 * 1024 * 1024,
+      pollMs: 5,
+      timeout: 5_000,
+    }), /output exceeds/i);
+    assert.ok(fs.statSync(outputPath).size < 10 * 1024 * 1024);
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
 });
 
 test('decode returns a readable TIFF and removes temporary files', async () => {

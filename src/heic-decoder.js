@@ -2,15 +2,14 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { execFile } = require('child_process');
-const { promisify } = require('util');
 const sharp = require('sharp');
 const config = require('./config');
 
-const execFileAsync = promisify(execFile);
 const defaultFixturePath = path.join(__dirname, '..', 'test', 'fixtures', 'heic-probe.heic');
 const DEFAULT_MAX_SOURCE_BYTES = 50 * 1024 * 1024;
 const DEFAULT_MAX_OUTPUT_BYTES = 256 * 1024 * 1024;
-let decodeQueue = Promise.resolve();
+let decodeLocked = false;
+const decodeWaiters = [];
 
 function baseCapability(mode = config.heicDecodeMode) {
   return {
@@ -83,10 +82,90 @@ function decoderError(err) {
     .slice(0, 500);
 }
 
+function acquireDecodeSlot(signal) {
+  if (!decodeLocked) {
+    decodeLocked = true;
+    return Promise.resolve(releaseDecodeSlot);
+  }
+  return new Promise((resolve, reject) => {
+    const waiter = { resolve, reject, signal, onAbort: null };
+    waiter.onAbort = () => {
+      const index = decodeWaiters.indexOf(waiter);
+      if (index >= 0) decodeWaiters.splice(index, 1);
+      reject(signal.reason || new Error('HEIC decode aborted'));
+    };
+    if (signal?.aborted) return waiter.onAbort();
+    signal?.addEventListener('abort', waiter.onAbort, { once: true });
+    decodeWaiters.push(waiter);
+  });
+}
+
+function releaseDecodeSlot() {
+  while (decodeWaiters.length) {
+    const waiter = decodeWaiters.shift();
+    waiter.signal?.removeEventListener('abort', waiter.onAbort);
+    if (waiter.signal?.aborted) continue;
+    waiter.resolve(releaseDecodeSlot);
+    return;
+  }
+  decodeLocked = false;
+}
+
+function runDecoderProcess(command, args, {
+  env,
+  signal,
+  timeout,
+  maxBuffer,
+  windowsHide,
+  outputPath,
+  maxOutputBytes,
+  pollMs = 25,
+} = {}) {
+  return new Promise((resolve, reject) => {
+    let limitError = null;
+    let settled = false;
+    const child = execFile(command, args, {
+      env,
+      signal,
+      timeout,
+      maxBuffer,
+      windowsHide,
+    }, (err, stdout, stderr) => {
+      if (settled) return;
+      settled = true;
+      clearInterval(monitor);
+      if (limitError) return reject(limitError);
+      if (err) {
+        err.stdout = stdout;
+        err.stderr = stderr;
+        return reject(err);
+      }
+      resolve({ stdout, stderr });
+    });
+    const monitor = setInterval(async () => {
+      try {
+        const output = await fs.promises.stat(outputPath);
+        if (output.size > maxOutputBytes && !limitError) {
+          limitError = new Error(
+            `Decoded HEIC output exceeds the ${maxOutputBytes}-byte safety limit`
+          );
+          child.kill('SIGKILL');
+        }
+      } catch (err) {
+        if (err.code !== 'ENOENT' && !limitError) {
+          limitError = err;
+          child.kill('SIGKILL');
+        }
+      }
+    }, pollMs);
+    monitor.unref();
+  });
+}
+
 async function decodeHeicBuffer(input, {
   command,
   tempRoot = os.tmpdir(),
-  execFileImpl = execFileAsync,
+  execFileImpl = runDecoderProcess,
   timeoutMs = 30_000,
   maxSourceBytes = DEFAULT_MAX_SOURCE_BYTES,
   maxOutputBytes = DEFAULT_MAX_OUTPUT_BYTES,
@@ -96,10 +175,7 @@ async function decodeHeicBuffer(input, {
   if (input.length > maxSourceBytes) {
     throw new Error(`HEIC source exceeds the ${maxSourceBytes}-byte safety limit`);
   }
-  const previous = decodeQueue;
-  let release;
-  decodeQueue = new Promise(resolve => { release = resolve; });
-  await previous;
+  const release = await acquireDecodeSlot(signal);
   try {
     signal?.throwIfAborted();
     const workDir = await fs.promises.mkdtemp(path.join(tempRoot, 'photodesk-heic-'));
@@ -125,6 +201,8 @@ async function decodeHeicBuffer(input, {
           timeout: timeoutMs,
           maxBuffer: 64 * 1024,
           windowsHide: true,
+          outputPath,
+          maxOutputBytes,
         });
       } catch (err) {
         throw new Error(`External HEIC decode failed: ${decoderError(err)}`);
@@ -148,7 +226,7 @@ async function probeHeicCapability({
   fixturePath = defaultFixturePath,
   findExecutableImpl = findExecutable,
   readFileImpl = fs.promises.readFile,
-  execFileImpl = execFileAsync,
+  execFileImpl = runDecoderProcess,
 } = {}) {
   if (mode === 'off') return baseCapability('off');
 
@@ -216,4 +294,5 @@ module.exports = {
   probeHeicCapability,
   resetHeicCapability,
   resolveExternalDecoder,
+  runDecoderProcess,
 };
