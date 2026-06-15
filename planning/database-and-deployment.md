@@ -102,9 +102,10 @@ npm run check:heic
 ```
 
 `npm run check:heic` decodes the committed synthetic HEVC fixture through the
-same external adapter used at runtime. The real iPhone source remains a manual
-production validation fixture rather than being copied from the private Immich
-library into git.
+same external adapter used at runtime. Automated integration tests also decode
+`test/fixtures/test.heic`, a location-scrubbed real tiled iPhone image approved
+for repository use. It verifies the `vips heifload --unlimited` path required
+when a modern HEIC exceeds libheif's default item-reference security limit.
 
 At runtime, an unavailable enabled decoder is logged and exposed by
 `GET /api/edits/capabilities`, but PhotoDesk continues serving non-HEIC edits.

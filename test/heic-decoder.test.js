@@ -80,6 +80,8 @@ test('decode returns a readable TIFF and removes temporary files', async () => {
       command: '/usr/bin/vips',
       tempRoot,
       execFileImpl: async (_command, args) => {
+        assert.deepEqual(args.slice(0, 1), ['heifload']);
+        assert.equal(args.at(-1), '--unlimited');
         await fs.promises.writeFile(args[2], tiff);
       },
     });
@@ -135,4 +137,18 @@ test('local Homebrew/system vips decodes the committed HEVC fixture when availab
     fixturePath,
   });
   assert.equal(result.heicDecode, 'available');
+});
+
+test('external decoder handles the real tiled iPhone HEIC fixture', {
+  skip: !findExecutable('vips'),
+}, async () => {
+  const decoded = await decodeHeicBuffer(
+    fs.readFileSync(path.join(__dirname, 'fixtures', 'test.heic')),
+    { command: findExecutable('vips') }
+  );
+  const metadata = await sharp(decoded).metadata();
+  assert.equal(metadata.width, 3052);
+  assert.equal(metadata.height, 2720);
+  assert.equal(metadata.orientation, 1);
+  assert.ok(metadata.icc);
 });

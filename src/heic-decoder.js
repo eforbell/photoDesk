@@ -98,7 +98,15 @@ async function decodeHeicBuffer(input, {
       // bundled plugin directory instead of its own codecs.
       const childEnv = { ...process.env };
       delete childEnv.VIPSHOME;
-      await execFileImpl(command, ['copy', inputPath, outputPath], {
+      // Immich originals are authenticated, trusted household assets. Modern
+      // tiled iPhone HEICs can exceed libheif's default item-reference limit,
+      // so use the loader-specific trusted-input override rather than `copy`.
+      await execFileImpl(command, [
+        'heifload',
+        inputPath,
+        outputPath,
+        '--unlimited',
+      ], {
         env: childEnv,
         timeout: timeoutMs,
         maxBuffer: 64 * 1024,

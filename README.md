@@ -186,7 +186,10 @@ service.
 
 External mode decodes into a private temporary TIFF, then reuses the existing
 Sharp crop/adjustment/JPEG pipeline. Originals remain untouched and failed
-re-renders preserve the previous ready derivative.
+re-renders preserve the previous ready derivative. The decoder uses
+`vips heifload --unlimited` because modern tiled iPhone files can exceed
+libheif's default item-reference limit; this override is restricted to
+authenticated Immich originals, not arbitrary public uploads.
 
 ## Design and planning
 

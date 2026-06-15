@@ -159,8 +159,8 @@
       "priority": "p1",
       "summary": "Acquire and commit representative iPhone HEIC fixtures and add decode/orientation/metadata assertions.",
       "acceptanceCriteria": [
-        "A small synthetic HEVC-coded HEIC fixture is committed under test/ and used by HEIC-003 and automated render tests, avoiding publication of a private family photo.",
-        "A real iPhone HEIC from the private Immich library, ideally the specific compression variant that previously reported 11.6003, is used for manual HomeServer validation without being copied into git; that distinction is documented.",
+        "Small synthetic HEVC-coded fixtures are committed under test/ for fast startup and orientation checks.",
+        "A location-scrubbed real tiled iPhone HEIC approved for repository use is committed as test/fixtures/test.heic and used by integration tests, including coverage for files that exceed libheif's default item-reference security limit.",
         "A test asserts a rotated iPhone HEIC renders upright (orientation correctness), since HEIC orientation is a common silent-rotation bug.",
         "A test asserts the rendered derivative dimensions/crop bounds and deterministic file creation, consistent with the Feature 3 JPEG fixture test."
       ],

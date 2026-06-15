@@ -286,6 +286,21 @@ test('external mode renders the committed HEVC fixture through system vips', {
       path.join(editDir, rotated.relativePath)
     ).metadata();
     assert.equal(rotatedMetadata.orientation, 1);
+
+    const iphone = await writeRenderedEdit({
+      input: fs.readFileSync(path.join(__dirname, 'fixtures', 'test.heic')),
+      adjustments: { ...NEUTRAL, exposure: 5, saturation: 5 },
+      crop: { aspect: '1:1', x: 0.05439, y: 0, width: 0.89122, height: 1 },
+      editDir,
+      sessionId: 12,
+      assetId: 'iphone-tiled',
+      source: {
+        originalFileName: 'test.heic',
+        contentType: 'image/heic',
+      },
+    });
+    assert.equal(iphone.width, 2720);
+    assert.equal(iphone.height, 2720);
   } finally {
     config.heicDecodeMode = previousMode;
     config.heicDecoderCommand = previousCommand;
