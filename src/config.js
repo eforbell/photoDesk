@@ -1,7 +1,7 @@
 require('dotenv').config();
 const path = require('path');
 
-const HEIC_DECODE_MODES = new Set(['off', 'external', 'libvips']);
+const HEIC_DECODE_MODES = new Set(['off', 'external']);
 
 function parseHeicDecodeMode(value, warn = message => console.warn(message)) {
   const mode = String(value || 'off').trim().toLowerCase();

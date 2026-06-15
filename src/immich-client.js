@@ -104,10 +104,10 @@ async function getThumbnailBuffer(assetId, credentials) {
   return { buffer, contentType };
 }
 
-async function getOriginalAssetBuffer(assetId, credentials) {
+async function getOriginalAssetBuffer(assetId, credentials, { signal } = {}) {
   const res = await fetch(
     `${resolveUrl(credentials)}/api/assets/${assetId}/original`,
-    { headers: authHeaders(credentials) }
+    { headers: authHeaders(credentials), signal }
   );
 
   if (!res.ok) {
@@ -122,9 +122,10 @@ async function getOriginalAssetBuffer(assetId, credentials) {
   };
 }
 
-async function getAssetInfo(assetId, credentials) {
+async function getAssetInfo(assetId, credentials, { signal } = {}) {
   const res = await fetch(`${resolveUrl(credentials)}/api/assets/${assetId}`, {
     headers: authHeaders(credentials),
+    signal,
   });
 
   if (!res.ok) {

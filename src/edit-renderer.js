@@ -10,11 +10,14 @@ const {
 } = require('./heic-decoder');
 
 function sharpCapabilities() {
+  const heif = sharp.format.heif;
   return {
     ...getHeicCapability(),
     sharpVersion: sharp.versions.sharp,
     libvipsVersion: sharp.versions.vips,
     heifVersion: sharp.versions.heif || null,
+    heifDecoder: Boolean(heif?.input?.buffer),
+    heicGuaranteed: Boolean(heif?.input?.fileSuffix?.includes('.heic')),
   };
 }
 
@@ -161,7 +164,7 @@ function heicUnavailableError(detail) {
   return err;
 }
 
-async function prepareRenderSource(input, source = {}) {
+async function prepareRenderSource(input, source = {}, { signal } = {}) {
   if (!isHeicSource(source)) {
     return { input, inputAlreadyOriented: false, exif: null };
   }
@@ -179,7 +182,7 @@ async function prepareRenderSource(input, source = {}) {
   }
   if (config.heicDecodeMode === 'external') {
     return {
-      input: await decodeHeicBuffer(input, { command: current.decoder }),
+      input: await decodeHeicBuffer(input, { command: current.decoder, signal }),
       inputAlreadyOriented: true,
       exif: immichExifMetadata(source.assetInfo),
     };
@@ -208,8 +211,9 @@ async function writeRenderedEdit({
   sessionId,
   assetId,
   source,
+  signal,
 }) {
-  const prepared = await prepareRenderSource(input, source);
+  const prepared = await prepareRenderSource(input, source, { signal });
   const result = await renderEditBuffer(
     prepared.input,
     adjustments,

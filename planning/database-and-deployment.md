@@ -112,11 +112,6 @@ At runtime, an unavailable enabled decoder is logged and exposed by
 During deployment, the preflight exits non-zero before the service is stopped.
 Rollback is setting `PHOTODESK_HEIC_DECODE=off`.
 
-The later in-process mode requires Sharp to link against a global libvips:
-
-```dotenv
-PHOTODESK_HEIC_DECODE=libvips
-```
-
-Sharp 0.34.5 requires libvips `>=8.17.3`; HomeServer's 8.15.1 is too old for that
-mode, so it remains a later source-build option.
+This delivery supports only `off` and `external`. A future in-process global
+libvips mode requires a separate feature with reproducible build and deployment
+steps; Sharp 0.34.5 requires libvips `>=8.17.3`, while HomeServer has 8.15.1.

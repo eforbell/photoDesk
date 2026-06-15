@@ -8,6 +8,9 @@ const config = require('./config');
 
 const execFileAsync = promisify(execFile);
 const defaultFixturePath = path.join(__dirname, '..', 'test', 'fixtures', 'heic-probe.heic');
+const DEFAULT_MAX_SOURCE_BYTES = 50 * 1024 * 1024;
+const DEFAULT_MAX_OUTPUT_BYTES = 256 * 1024 * 1024;
+let decodeQueue = Promise.resolve();
 
 function baseCapability(mode = config.heicDecodeMode) {
   return {
@@ -85,39 +88,57 @@ async function decodeHeicBuffer(input, {
   tempRoot = os.tmpdir(),
   execFileImpl = execFileAsync,
   timeoutMs = 30_000,
+  maxSourceBytes = DEFAULT_MAX_SOURCE_BYTES,
+  maxOutputBytes = DEFAULT_MAX_OUTPUT_BYTES,
+  signal,
 } = {}) {
   if (!command) throw new Error('HEIC decoder command is unavailable');
-  const workDir = await fs.promises.mkdtemp(path.join(tempRoot, 'photodesk-heic-'));
-  const inputPath = path.join(workDir, 'source.heic');
-  const outputPath = path.join(workDir, 'decoded.tif');
+  if (input.length > maxSourceBytes) {
+    throw new Error(`HEIC source exceeds the ${maxSourceBytes}-byte safety limit`);
+  }
+  const previous = decodeQueue;
+  let release;
+  decodeQueue = new Promise(resolve => { release = resolve; });
+  await previous;
   try {
-    await fs.promises.writeFile(inputPath, input);
+    signal?.throwIfAborted();
+    const workDir = await fs.promises.mkdtemp(path.join(tempRoot, 'photodesk-heic-'));
+    const inputPath = path.join(workDir, 'source.heic');
+    const outputPath = path.join(workDir, 'decoded.tif');
     try {
-      // sharp's bundled libvips sets VIPSHOME in the parent process. Passing
-      // that value to the standalone system vips binary can make it load the
-      // bundled plugin directory instead of its own codecs.
-      const childEnv = { ...process.env };
-      delete childEnv.VIPSHOME;
-      // Immich originals are authenticated, trusted household assets. Modern
-      // tiled iPhone HEICs can exceed libheif's default item-reference limit,
-      // so use the loader-specific trusted-input override rather than `copy`.
-      await execFileImpl(command, [
-        'heifload',
-        inputPath,
-        outputPath,
-        '--unlimited',
-      ], {
-        env: childEnv,
-        timeout: timeoutMs,
-        maxBuffer: 64 * 1024,
-        windowsHide: true,
-      });
-    } catch (err) {
-      throw new Error(`External HEIC decode failed: ${decoderError(err)}`);
+      await fs.promises.writeFile(inputPath, input);
+      try {
+        const childEnv = {
+          ...process.env,
+          VIPS_CONCURRENCY: '1',
+          VIPS_DISC_THRESHOLD: String(Math.min(maxOutputBytes, 64 * 1024 * 1024)),
+        };
+        delete childEnv.VIPSHOME;
+        await execFileImpl(command, [
+          'heifload',
+          inputPath,
+          outputPath,
+          '--unlimited',
+        ], {
+          env: childEnv,
+          signal,
+          timeout: timeoutMs,
+          maxBuffer: 64 * 1024,
+          windowsHide: true,
+        });
+      } catch (err) {
+        throw new Error(`External HEIC decode failed: ${decoderError(err)}`);
+      }
+      const output = await fs.promises.stat(outputPath);
+      if (output.size > maxOutputBytes) {
+        throw new Error(`Decoded HEIC output exceeds the ${maxOutputBytes}-byte safety limit`);
+      }
+      return await fs.promises.readFile(outputPath);
+    } finally {
+      await fs.promises.rm(workDir, { recursive: true, force: true });
     }
-    return await fs.promises.readFile(outputPath);
   } finally {
-    await fs.promises.rm(workDir, { recursive: true, force: true });
+    release();
   }
 }
 
@@ -166,27 +187,7 @@ async function probeHeicCapability({
       };
     }
   }
-
-  try {
-    const fixture = await readFileImpl(fixturePath);
-    const metadata = await sharp(fixture).metadata();
-    if (!metadata.width || !metadata.height) {
-      throw new Error('decoded fixture dimensions are unavailable');
-    }
-    return {
-      mode: 'libvips',
-      decoder: 'sharp',
-      heicDecode: 'available',
-      detail: null,
-    };
-  } catch (err) {
-    return {
-      mode: 'libvips',
-      decoder: 'sharp',
-      heicDecode: 'unavailable',
-      detail: `Sharp/libvips HEIC fixture decode failed: ${decoderError(err)}`,
-    };
-  }
+  return baseCapability('off');
 }
 
 async function initializeHeicCapability(options = {}) {

@@ -243,4 +243,4 @@
 ## 2026-06-15 — Feature #7 production validation
 - Enabled `PHOTODESK_HEIC_DECODE=external` on HomeServer without setting `PHOTODESK_HEIC_DECODER_CMD`; systemd/PATH discovery found vips successfully.
 - Edited a real iPhone HEIC, rendered the derivative, uploaded it back to Immich, and confirmed the uploaded result.
-- This closes the external-mode target-host validation gap. The optional in-process global-libvips mode remains a later follow-up.
+- This closes the external-mode target-host validation gap. The runtime accepts only `off` and `external`; any in-process global-libvips mode is a separate future feature.

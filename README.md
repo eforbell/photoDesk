@@ -189,7 +189,10 @@ Sharp crop/adjustment/JPEG pipeline. Originals remain untouched and failed
 re-renders preserve the previous ready derivative. The decoder uses
 `vips heifload --unlimited` because modern tiled iPhone files can exceed
 libheif's default item-reference limit; this override is restricted to
-authenticated Immich originals, not arbitrary public uploads.
+authenticated Immich originals, not arbitrary public uploads. PhotoDesk
+serializes HEIC decodes, limits source files to 50 MiB and decoded TIFFs to
+256 MiB, constrains vips to one worker, and aborts the subprocess when the
+client disconnects.
 
 ## Design and planning
 

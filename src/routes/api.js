@@ -700,6 +700,12 @@ router.post('/edits', async (req, res, next) => {
 
   let adjustments;
   let crop;
+  const abortController = new AbortController();
+  const abortWork = () => {
+    if (!res.writableEnded) abortController.abort(new Error('Edit request aborted'));
+  };
+  req.once('aborted', abortWork);
+  res.once('close', abortWork);
   try {
     adjustments = validateAdjustments(req.body.adjustments);
     crop = validateCrop(req.body.crop);
@@ -735,19 +741,20 @@ router.post('/edits', async (req, res, next) => {
       `).run(sessionId, assetId, JSON.stringify(adjustments), JSON.stringify(crop));
 
       let rendered;
+      let renderSourceIsHeic = false;
       try {
         const assetMetadata = sessionAssetMetadata(db, sessionId, assetId) || {};
-        const heicSource = isHeicSource(assetMetadata);
         const credentials = profileCredentials(req);
-        const [original, assetInfo] = await Promise.all([
-          getOriginalAssetBuffer(assetId, credentials),
-          heicSource && config.heicDecodeMode === 'external'
-            ? getAssetInfo(assetId, credentials).catch(err => {
-                console.warn('[edits] HEIC metadata lookup failed:', err.message);
-                return null;
-              })
-            : Promise.resolve(null),
-        ]);
+        const original = await getOriginalAssetBuffer(assetId, credentials, {
+          signal: abortController.signal,
+        });
+        renderSourceIsHeic = isHeicSource({
+          ...assetMetadata,
+          contentType: original.contentType,
+        });
+        const assetInfo = renderSourceIsHeic && config.heicDecodeMode === 'external'
+          ? await getAssetInfo(assetId, credentials, { signal: abortController.signal })
+          : null;
         rendered = await writeRenderedEdit({
           input: original.buffer,
           adjustments,
@@ -760,6 +767,7 @@ router.post('/edits', async (req, res, next) => {
             contentType: original.contentType,
             assetInfo,
           },
+          signal: abortController.signal,
         });
         db.prepare(`
           UPDATE edits
@@ -788,7 +796,7 @@ router.post('/edits', async (req, res, next) => {
             console.warn('[edits] Failed to remove incomplete render:', cleanupError.message);
           }
         }
-        const isHeic = isHeicSource(
+        const isHeic = renderSourceIsHeic || isHeicSource(
           sessionAssetMetadata(db, sessionId, assetId) || {}
         );
         const detail = clientErrorMessage(err);
@@ -838,6 +846,9 @@ router.post('/edits', async (req, res, next) => {
     return res.status(result.status).json(result.body);
   } catch (err) {
     next(err);
+  } finally {
+    req.off('aborted', abortWork);
+    res.off('close', abortWork);
   }
 });
 

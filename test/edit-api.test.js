@@ -31,7 +31,10 @@ const crypto = require('crypto');
 const app = require('../src/app');
 const config = require('../src/config');
 const { getDb } = require('../src/db');
-const { resetHeicCapability } = require('../src/heic-decoder');
+const {
+  initializeHeicCapability,
+  resetHeicCapability,
+} = require('../src/heic-decoder');
 
 let server;
 let baseUrl;
@@ -289,6 +292,118 @@ test('HEIC mode off preserves the previous ready derivative without attempting d
     assert.equal(body.edit.rendered_path, previous.rendered_path);
     assert.deepEqual(fs.readFileSync(previousFile), previousBytes);
   } finally {
+    config.heicDecodeMode = previousMode;
+    resetHeicCapability();
+    assets[0].originalFileName = 'asset-1.jpg';
+    db.prepare('UPDATE scenes SET asset_ids = ? WHERE session_id = 1')
+      .run(JSON.stringify(assets));
+  }
+});
+
+async function enableFailingExternalDecoder() {
+  config.heicDecodeMode = 'external';
+  const probeTiff = await sharp({
+    create: { width: 2, height: 2, channels: 3, background: '#000' },
+  }).tiff().toBuffer();
+  await initializeHeicCapability({
+    mode: 'external',
+    decoderCommand: '/bin/false',
+    findExecutableImpl: () => '/bin/false',
+    execFileImpl: async (_command, args) => {
+      await fs.promises.writeFile(args[2], probeTiff);
+    },
+  });
+}
+
+test('content-type-only HEIC metadata failure preserves the previous ready derivative', async () => {
+  const previousMode = config.heicDecodeMode;
+  const db = getDb();
+  const scene = db.prepare('SELECT asset_ids FROM scenes WHERE session_id = 1').get();
+  const assets = JSON.parse(scene.asset_ids);
+  assets[0].originalFileName = 'legacy-asset-without-heic-extension.jpg';
+  db.prepare('UPDATE scenes SET asset_ids = ? WHERE session_id = 1')
+    .run(JSON.stringify(assets));
+  const previous = db.prepare(
+    'SELECT * FROM edits WHERE session_id = 1 AND asset_id = ?'
+  ).get('asset-1');
+  const previousFile = path.join(process.env.PHOTODESK_EDIT_DIR, previous.rendered_path);
+  const previousBytes = fs.readFileSync(previousFile);
+  try {
+    await enableFailingExternalDecoder();
+    originalHandler = async url => String(url).endsWith('/original')
+      ? new Response(originalResponse, {
+          status: 200,
+          headers: { 'content-type': 'image/heic' },
+        })
+      : Response.json({ message: 'metadata unavailable' }, { status: 503 });
+    const response = await authFetch(`${baseUrl}/api/edits`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        sessionId: 1,
+        assetId: 'asset-1',
+        adjustments: { saturation: 20 },
+        crop: { aspect: 'Original' },
+      }),
+    });
+    assert.equal(response.status, 422);
+    const body = await response.json();
+    assert.match(body.error, /Asset info fetch failed: 503/);
+    assert.equal(body.edit.render_status, 'ready');
+    assert.equal(body.edit.rendered_path, previous.rendered_path);
+    assert.deepEqual(fs.readFileSync(previousFile), previousBytes);
+  } finally {
+    originalHandler = null;
+    config.heicDecodeMode = previousMode;
+    resetHeicCapability();
+    assets[0].originalFileName = 'asset-1.jpg';
+    db.prepare('UPDATE scenes SET asset_ids = ? WHERE session_id = 1')
+      .run(JSON.stringify(assets));
+  }
+});
+
+test('enabled external decoder failure preserves the previous ready derivative', async () => {
+  const previousMode = config.heicDecodeMode;
+  const db = getDb();
+  const scene = db.prepare('SELECT asset_ids FROM scenes WHERE session_id = 1').get();
+  const assets = JSON.parse(scene.asset_ids);
+  assets[0].originalFileName = 'IMG_0001.HEIC';
+  db.prepare('UPDATE scenes SET asset_ids = ? WHERE session_id = 1')
+    .run(JSON.stringify(assets));
+  const previous = db.prepare(
+    'SELECT * FROM edits WHERE session_id = 1 AND asset_id = ?'
+  ).get('asset-1');
+  const previousFile = path.join(process.env.PHOTODESK_EDIT_DIR, previous.rendered_path);
+  const previousBytes = fs.readFileSync(previousFile);
+  try {
+    await enableFailingExternalDecoder();
+    originalHandler = async url => String(url).endsWith('/original')
+      ? new Response(originalResponse, {
+          status: 200,
+          headers: { 'content-type': 'image/heic' },
+        })
+      : Response.json({
+          id: 'asset-1',
+          exifInfo: { dateTimeOriginal: '2026-06-15T14:30:45.000Z' },
+        });
+    const response = await authFetch(`${baseUrl}/api/edits`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        sessionId: 1,
+        assetId: 'asset-1',
+        adjustments: { contrast: 20 },
+        crop: { aspect: 'Original' },
+      }),
+    });
+    assert.equal(response.status, 422);
+    const body = await response.json();
+    assert.match(body.error, /External HEIC decode failed/);
+    assert.equal(body.edit.render_status, 'ready');
+    assert.equal(body.edit.rendered_path, previous.rendered_path);
+    assert.deepEqual(fs.readFileSync(previousFile), previousBytes);
+  } finally {
+    originalHandler = null;
     config.heicDecodeMode = previousMode;
     resetHeicCapability();
     assets[0].originalFileName = 'asset-1.jpg';

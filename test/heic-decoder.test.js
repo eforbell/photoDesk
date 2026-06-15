@@ -70,6 +70,79 @@ test('decode cleans its private temporary directory after command failure', asyn
   }
 });
 
+test('decode rejects oversized HEIC sources before creating temporary files', async () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'photodesk-heic-test-'));
+  try {
+    await assert.rejects(
+      decodeHeicBuffer(Buffer.alloc(11), {
+        command: '/usr/bin/vips',
+        tempRoot,
+        maxSourceBytes: 10,
+      }),
+      /source exceeds/i
+    );
+    assert.deepEqual(fs.readdirSync(tempRoot), []);
+  } finally {
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test('decode rejects oversized TIFF output and cleans temporary files', async () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'photodesk-heic-test-'));
+  try {
+    await assert.rejects(
+      decodeHeicBuffer(Buffer.from('fake-heic'), {
+        command: '/usr/bin/vips',
+        tempRoot,
+        maxOutputBytes: 10,
+        execFileImpl: async (_command, args) => {
+          await fs.promises.writeFile(args[2], Buffer.alloc(11));
+        },
+      }),
+      /output exceeds/i
+    );
+    assert.deepEqual(fs.readdirSync(tempRoot), []);
+  } finally {
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test('decode forwards abort signals to the decoder process', async () => {
+  const controller = new AbortController();
+  controller.abort();
+  await assert.rejects(
+    decodeHeicBuffer(Buffer.from('fake-heic'), {
+      command: '/usr/bin/vips',
+      signal: controller.signal,
+      execFileImpl: async (_command, _args, options) => {
+        assert.equal(options.signal, controller.signal);
+        throw controller.signal.reason;
+      },
+    }),
+    /abort/i
+  );
+});
+
+test('external HEIC decodes are globally serialized', async () => {
+  let active = 0;
+  let peak = 0;
+  const tiff = await sharp({
+    create: { width: 2, height: 2, channels: 3, background: '#000' },
+  }).tiff().toBuffer();
+  const execFileImpl = async (_command, args) => {
+    active++;
+    peak = Math.max(peak, active);
+    await new Promise(resolve => setTimeout(resolve, 20));
+    await fs.promises.writeFile(args[2], tiff);
+    active--;
+  };
+  await Promise.all([
+    decodeHeicBuffer(Buffer.from('first'), { command: '/usr/bin/vips', execFileImpl }),
+    decodeHeicBuffer(Buffer.from('second'), { command: '/usr/bin/vips', execFileImpl }),
+  ]);
+  assert.equal(peak, 1);
+});
+
 test('decode returns a readable TIFF and removes temporary files', async () => {
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'photodesk-heic-test-'));
   const tiff = await sharp({
