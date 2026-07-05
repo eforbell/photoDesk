@@ -2277,12 +2277,27 @@ input.suggestion-name:focus {
   margin-top: 2px;
 }
 
+.commit-modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+.commit-modal-overlay.hidden { display: none; }
+
 .commit-confirmation {
+  width: min(480px, 100%);
+  max-height: calc(100dvh - 40px);
+  overflow-y: auto;
   background: var(--bg-deep);
   border: 1px solid var(--border);
   border-radius: 12px;
   padding: 18px;
-  margin-bottom: 24px;
   box-shadow: 0 18px 50px rgba(0, 0, 0, 0.28);
 }
 .commit-confirm-eyebrow {
@@ -2338,6 +2353,43 @@ input.suggestion-name:focus {
   justify-content: flex-end;
   gap: 9px;
   margin-top: 16px;
+}
+
+/* Commit progress modal states */
+.commit-modal-wait {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  padding: 22px 8px 14px;
+  text-align: center;
+}
+.commit-modal-wait h3 { margin: 0; font-size: 17px; }
+.commit-modal-wait .commit-confirm-note { margin: 0; max-width: 300px; }
+
+.commit-modal-badge {
+  width: 54px;
+  height: 54px;
+  border-radius: 99px;
+  margin: 6px auto 12px;
+  display: grid;
+  place-items: center;
+  color: var(--keep);
+  background: color-mix(in oklab, var(--keep) 16%, transparent);
+}
+.commit-modal-badge.failed {
+  color: var(--reject);
+  background: color-mix(in oklab, var(--reject) 14%, transparent);
+}
+.commit-modal-result h3 {
+  text-align: center;
+  font-size: 17px;
+  margin: 0 0 14px;
+}
+.commit-modal-lines {
+  border-top: 1px solid var(--border-soft);
+  border-bottom: 1px solid var(--border-soft);
+  padding: 8px 0;
 }
 
 /* Progress log */
@@ -2471,4 +2523,27 @@ input.suggestion-name:focus {
   .lb-star { padding: 6px; }
   .lb-star svg { width: 24px; height: 24px; }
   .filmstrip-thumb { height: 72px; }
+
+  /* Progress rail (Review/Rate/Stack/Commit): thumb-sized pills.
+     Declared after the max-width blocks so it wins on touch.
+     When the pills overflow, a centered flex container clips its
+     leading edge unrecoverably — anchor left and center via auto
+     margins on the ends instead, which still centers when it fits. */
+  .progress-rail { justify-content: flex-start; }
+  .progress-rail > :first-child { margin-left: auto; }
+  .progress-rail > :last-child { margin-right: auto; }
+  .rail-step {
+    min-height: 42px;
+    gap: 6px;
+    padding: 8px 10px 8px 8px;
+    font-size: 13.5px;
+  }
+  .rail-step-dot {
+    width: 24px;
+    height: 24px;
+  }
+  .rail-step-count {
+    padding-inline: 6px;
+    font-size: 12px;
+  }
 }

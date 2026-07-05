@@ -2382,7 +2382,7 @@ function showSummary() {
 
   // Reset commit state
   $('commit-log').innerHTML = '';
-  $('commit-confirmation').classList.add('hidden');
+  $('commit-modal').classList.add('hidden');
   $('summary-actions').classList.remove('hidden');
   if (state.currentSession._committed) {
     $('commit-options').style.display = 'none';
@@ -2401,7 +2401,7 @@ function showSummary() {
 }
 
 $('back-to-review').addEventListener('click', () => {
-  $('commit-confirmation').classList.add('hidden');
+  $('commit-modal').classList.add('hidden');
   showScreen('review');
 });
 
@@ -2414,7 +2414,6 @@ function selectedCommitOptions() {
   };
 }
 
-let pendingCommitOptions = null;
 let commitRequestInFlight = false;
 
 function setCommitOptionControlsDisabled(disabled) {
@@ -2427,149 +2426,122 @@ function setCommitOptionControlsDisabled(disabled) {
   $('opt-upload-edits').disabled = disabled || !hasEdits;
 }
 
-function closeCommitConfirmation() {
-  if (commitRequestInFlight) return;
-  pendingCommitOptions = null;
-  $('commit-confirmation').classList.add('hidden');
-  $('summary-actions').classList.remove('hidden');
-  setCommitOptionControlsDisabled(false);
-  $('commit-btn').disabled = false;
-  $('commit-btn').innerHTML = `Commit to Immich ${icon('arrowR', 15)}`;
+function showCommitModal(html) {
+  $('commit-modal-body').innerHTML = html;
+  $('commit-modal').classList.remove('hidden');
 }
 
-function showCommitConfirmation(preview, options) {
-  pendingCommitOptions = { ...options };
-  setCommitOptionControlsDisabled(true);
-  const selectedSteps = preview.steps.filter(step => step.selected);
-  $('commit-confirm-steps').innerHTML = selectedSteps.length
-    ? selectedSteps.map(step => {
-      const pending = `${step.pending} pending`;
-      const applied = step.alreadyApplied > 0
-        ? ` · ${step.alreadyApplied} already applied`
-        : '';
-      return `
-        <div class="commit-confirm-step">
-          <span>${escHtml(step.label)}</span>
-          <strong>${escHtml(pending + applied)}</strong>
-        </div>
-      `;
-    }).join('')
-    : `
-      <div class="commit-confirm-step">
-        <span>Immich changes</span>
-        <strong>None selected</strong>
-      </div>
-    `;
-  const warning = $('commit-confirm-warning');
-  warning.textContent = preview.warnings.join(' ');
-  warning.classList.toggle('hidden', preview.warnings.length === 0);
-  $('commit-confirm-note').textContent = preview.pendingActions > 0
-    ? 'PhotoDesk records each successful action. If a later action fails, Retry sends only unfinished work.'
-    : 'No new Immich operations are pending. Confirming will mark this review session processed.';
-  if (preview.steps.some(step => step.id === 'edits' && step.selected && step.recheckedAtCommit)) {
-    $('commit-confirm-note').textContent += ' Uploaded edits are rechecked against Immich when the commit starts.';
-  }
-  $('commit-confirm-apply').textContent = preview.pendingActions > 0
-    ? `Confirm ${preview.pendingActions} ${preview.pendingActions === 1 ? 'action' : 'actions'}`
-    : 'Mark reviewed';
-  $('commit-confirmation').classList.remove('hidden');
-  $('summary-actions').classList.add('hidden');
-  $('commit-confirm-apply').focus();
+function hideCommitModal() {
+  if (commitRequestInFlight) return;
+  $('commit-modal').classList.add('hidden');
 }
 
 async function executeCommit(options) {
   if (commitRequestInFlight) return;
   commitRequestInFlight = true;
-  $('commit-confirm-apply').disabled = true;
-  $('commit-confirm-cancel').disabled = true;
-  pendingCommitOptions = null;
-  $('commit-confirmation').classList.add('hidden');
-  $('summary-actions').classList.remove('hidden');
+  setCommitOptionControlsDisabled(true);
   $('commit-btn').disabled = true;
-  $('commit-btn').innerHTML = `<span class="spinner" style="width:15px;height:15px;border-width:2px;display:inline-block;vertical-align:middle;margin-right:6px;"></span> Committing\u2026`;
+  showCommitModal(`
+    <div class="commit-modal-wait">
+      <span class="spinner"></span>
+      <h3>Committing to Immich\u2026</h3>
+      <p class="commit-confirm-note">Each successful action is recorded, so a retry only sends unfinished work.</p>
+    </div>
+  `);
 
-  const logEl = $('commit-log');
-  logEl.innerHTML = '<div class="commit-log" id="commit-log-inner"></div>';
-  const logInner = $('commit-log-inner');
-
-  // Hide options
-  $('commit-options').style.display = 'none';
-
-  function addLogLine(msg) {
-    logInner.innerHTML += `<div class="commit-log-line">${icon('check', 14, 2.4)} ${escHtml(msg)}</div>`;
-  }
-
+  let html;
   try {
     const result = await api('POST', `/api/sessions/${state.currentSession.id}/commit`, {
       ...options,
     });
 
+    const lines = [];
     for (const action of result.steps || []) {
       if (!action.selected) continue;
       if (action.succeeded > 0) {
-        addLogLine(`${action.label}: ${action.succeeded} completed`);
+        lines.push(`<div class="commit-log-line">${icon('check', 14, 2.4)} ${escHtml(action.label)}: ${action.succeeded} completed</div>`);
       }
       if (action.alreadyApplied > 0) {
-        logInner.innerHTML += `<div class="commit-log-line skipped">${icon('check', 14, 2)} ${escHtml(action.label)}: ${action.alreadyApplied} already applied, skipped</div>`;
+        lines.push(`<div class="commit-log-line skipped">${icon('check', 14, 2)} ${escHtml(action.label)}: ${action.alreadyApplied} already applied, skipped</div>`);
       }
       for (const error of action.errors || []) {
-        logInner.innerHTML += `<div class="commit-log-line failed">${icon('x', 14, 2.4)} ${escHtml(error)}</div>`;
+        lines.push(`<div class="commit-log-line failed">${icon('x', 14, 2.4)} ${escHtml(error)}</div>`);
       }
     }
-    if (result.steps?.every(action => !action.selected || (
-      action.succeeded === 0 && action.alreadyApplied === 0 && action.errors.length === 0
-    ))) {
-      addLogLine('No Immich changes selected');
+    if (!lines.length) {
+      lines.push(`<div class="commit-log-line skipped">No Immich changes selected</div>`);
     }
 
     if (result.committed) {
-      logInner.innerHTML += `<div class="commit-log-done">Done. Immich is up to date.</div>`;
-      $('commit-options').style.display = 'none';
       state.currentSession._committed = true;
+      $('commit-options').style.display = 'none';
       $('commit-btn').disabled = false;
       $('commit-btn').innerHTML = `Done`;
       $('commit-btn').onclick = () => { showScreen('home'); loadLibrary(); };
+      html = `
+        <div class="commit-modal-result">
+          <div class="commit-modal-badge">${icon('check', 28, 2.6)}</div>
+          <h3>Committed</h3>
+          <div class="commit-modal-lines">${lines.join('')}</div>
+          <div class="commit-confirm-actions">
+            <button class="btn btn-primary" id="commit-modal-done">Back to library ${icon('arrowR', 15)}</button>
+          </div>
+        </div>
+      `;
     } else {
-      logInner.innerHTML += '<div class="commit-log-line" style="color: var(--reject)">Commit incomplete. Fix the errors above and retry.</div>';
-      $('commit-options').style.display = '';
-      setCommitOptionControlsDisabled(false);
       $('commit-btn').disabled = false;
       $('commit-btn').innerHTML = `Retry ${icon('arrowR', 15)}`;
+      html = `
+        <div class="commit-modal-result">
+          <div class="commit-modal-badge failed">${icon('x', 28, 2.6)}</div>
+          <h3>Commit incomplete</h3>
+          <div class="commit-modal-lines">${lines.join('')}</div>
+          <p class="commit-confirm-note">Only unfinished work is sent again on retry \u2014 everything marked done above stays done.</p>
+          <div class="commit-confirm-actions">
+            <button class="btn btn-ghost" id="commit-modal-close">Close</button>
+          </div>
+        </div>
+      `;
     }
-
   } catch (err) {
-    logInner.innerHTML += `<div class="commit-log-line" style="color: var(--reject)">${icon('x', 14, 2.4)} Commit failed: ${escHtml(err.message)}</div>`;
-    setCommitOptionControlsDisabled(false);
     $('commit-btn').disabled = false;
     $('commit-btn').innerHTML = `Retry ${icon('arrowR', 15)}`;
+    html = `
+      <div class="commit-modal-result">
+        <div class="commit-modal-badge failed">${icon('x', 28, 2.6)}</div>
+        <h3>Commit failed</h3>
+        <p class="commit-confirm-note">${escHtml(err.message)}</p>
+        <div class="commit-confirm-actions">
+          <button class="btn btn-ghost" id="commit-modal-close">Close</button>
+        </div>
+      </div>
+    `;
   } finally {
     commitRequestInFlight = false;
-    $('commit-confirm-apply').disabled = false;
-    $('commit-confirm-cancel').disabled = false;
+    setCommitOptionControlsDisabled(false);
   }
+
+  showCommitModal(html);
+  $('commit-modal-done')?.addEventListener('click', () => {
+    hideCommitModal();
+    showScreen('home');
+    loadLibrary();
+  });
+  $('commit-modal-close')?.addEventListener('click', hideCommitModal);
 }
 
-$('commit-btn').addEventListener('click', async () => {
+$('commit-btn').addEventListener('click', () => {
   if (state.currentSession._committed) return;
-  const options = selectedCommitOptions();
-  $('commit-btn').disabled = true;
-  $('commit-btn').innerHTML = `<span class="spinner" style="width:15px;height:15px;border-width:2px;display:inline-block;vertical-align:middle;margin-right:6px;"></span> Checking\u2026`;
-  try {
-    const preview = await api(
-      'POST',
-      `/api/sessions/${state.currentSession.id}/commit?dryRun=true`,
-      options
-    );
-    showCommitConfirmation(preview, options);
-  } catch (err) {
-    $('commit-log').innerHTML = `<div class="commit-log"><div class="commit-log-line failed">${icon('x', 14, 2.4)} Preview failed: ${escHtml(err.message)}</div></div>`;
-    closeCommitConfirmation();
-  }
+  executeCommit(selectedCommitOptions());
 });
 
-$('commit-confirm-cancel').addEventListener('click', closeCommitConfirmation);
-$('commit-confirm-apply').addEventListener('click', () => {
-  executeCommit(pendingCommitOptions || selectedCommitOptions());
+$('commit-modal').addEventListener('click', (e) => {
+  if (e.target === e.currentTarget) hideCommitModal();
+});
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && !$('commit-modal').classList.contains('hidden')) {
+    hideCommitModal();
+  }
 });
 
 // ── Utilities ──────────────────────────────────────────────────
