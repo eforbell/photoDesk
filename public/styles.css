@@ -2547,3 +2547,13 @@ input.suggestion-name:focus {
     font-size: 12px;
   }
 }
+
+/* ── iOS SAFE AREAS ──────────────────────────────────────────
+   With viewport-fit=cover the page runs edge-to-edge under the
+   status bar in the home-screen wrapper; pad top-level chrome by
+   the top inset. env() resolves to 0 everywhere else. */
+.library-header { padding-top: env(safe-area-inset-top); }
+.review-topbar { padding-top: calc(11px + env(safe-area-inset-top)); }
+.lb-header { padding-top: calc(12px + env(safe-area-inset-top)); }
+.editor-header { padding-top: calc(12px + env(safe-area-inset-top)); }
+.settings-header { padding-top: env(safe-area-inset-top); }
