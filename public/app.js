@@ -1531,6 +1531,11 @@ async function recordRating(assetId, rating) {
       assetId,
     }).catch(err => console.warn('Rating delete failed:', err));
   } else {
+    // A starred photo is implicitly a keeper: rating marks it Pick
+    // (clearing the rating later leaves the Pick in place).
+    if (state.decisionMap[assetId] !== 'pick') {
+      recordDecision(assetId, 'pick');
+    }
     state.ratingMap[assetId] = rating;
     api('POST', '/api/ratings', {
       sessionId: state.currentSession.id,
