@@ -2277,12 +2277,27 @@ input.suggestion-name:focus {
   margin-top: 2px;
 }
 
+.commit-modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+.commit-modal-overlay.hidden { display: none; }
+
 .commit-confirmation {
+  width: min(480px, 100%);
+  max-height: calc(100dvh - 40px);
+  overflow-y: auto;
   background: var(--bg-deep);
   border: 1px solid var(--border);
   border-radius: 12px;
   padding: 18px;
-  margin-bottom: 24px;
   box-shadow: 0 18px 50px rgba(0, 0, 0, 0.28);
 }
 .commit-confirm-eyebrow {
@@ -2338,6 +2353,43 @@ input.suggestion-name:focus {
   justify-content: flex-end;
   gap: 9px;
   margin-top: 16px;
+}
+
+/* Commit progress modal states */
+.commit-modal-wait {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  padding: 22px 8px 14px;
+  text-align: center;
+}
+.commit-modal-wait h3 { margin: 0; font-size: 17px; }
+.commit-modal-wait .commit-confirm-note { margin: 0; max-width: 300px; }
+
+.commit-modal-badge {
+  width: 54px;
+  height: 54px;
+  border-radius: 99px;
+  margin: 6px auto 12px;
+  display: grid;
+  place-items: center;
+  color: var(--keep);
+  background: color-mix(in oklab, var(--keep) 16%, transparent);
+}
+.commit-modal-badge.failed {
+  color: var(--reject);
+  background: color-mix(in oklab, var(--reject) 14%, transparent);
+}
+.commit-modal-result h3 {
+  text-align: center;
+  font-size: 17px;
+  margin: 0 0 14px;
+}
+.commit-modal-lines {
+  border-top: 1px solid var(--border-soft);
+  border-bottom: 1px solid var(--border-soft);
+  padding: 8px 0;
 }
 
 /* Progress log */
@@ -2404,4 +2456,138 @@ input.suggestion-name:focus {
   color: var(--text-ghost);
   padding: 80px 0;
   font-size: 14px;
+}
+
+/* ── TOUCH DEVICES (coarse pointer) ──────────────────────────
+   iOS/tablet ergonomics. Everything in here is additive and
+   gated on pointer:coarse so desktop behavior is unchanged. */
+.lb-touch-actions { display: none; }
+
+@media (pointer: coarse) {
+  /* Grid quick actions: always visible and thumb-sized
+     (hover-gated reveals never fire reliably on touch) */
+  .grid-item-hover { opacity: 1; pointer-events: auto; }
+  .grid-hover-actions {
+    padding: 30px 8px 8px;
+    gap: 8px;
+  }
+  .quick-btn {
+    width: 40px;
+    height: 40px;
+    border-radius: 9px;
+  }
+  .quick-btn svg { width: 18px; height: 18px; }
+
+  /* Keyboard legends are meaningless without a keyboard */
+  .keyboard-legend { display: none; }
+  .lb-hints { display: none; }
+  .lb-edit-button .kbd { display: none; }
+
+  /* Lightbox: swipes navigate, so drop the floating arrows;
+     touch-action:none frees the stage for gesture handling */
+  .lb-nav { display: none; }
+  .lb-stage { touch-action: none; }
+  .lb-image-wrap { transition: transform 0.18s ease; }
+
+  /* Touch action bar */
+  .lb-touch-actions {
+    flex: none;
+    display: grid;
+    grid-auto-flow: column;
+    grid-auto-columns: 1fr;
+    gap: 8px;
+    padding: 8px 10px calc(10px + env(safe-area-inset-bottom));
+    background: var(--bg-deep);
+    border-top: 1px solid var(--border-soft);
+  }
+  .lb-touch-btn {
+    min-height: 48px;
+    border-radius: 10px;
+    border: 1px solid var(--border-soft);
+    background: var(--panel);
+    color: var(--text);
+    font-family: inherit;
+    font-size: 13.5px;
+    font-weight: 600;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 7px;
+    cursor: pointer;
+  }
+  .lb-touch-btn:active { background: var(--panel-2); }
+  .lb-touch-btn.keep { color: var(--keep); border-color: color-mix(in oklab, var(--keep) 40%, transparent); }
+  .lb-touch-btn.reject { color: var(--reject); border-color: color-mix(in oklab, var(--reject) 40%, transparent); }
+
+  /* Bigger rating stars and filmstrip targets */
+  .lb-star { padding: 6px; }
+  .lb-star svg { width: 24px; height: 24px; }
+  .filmstrip-thumb { height: 72px; }
+
+  /* Progress rail (Review/Rate/Stack/Commit): thumb-sized pills.
+     Declared after the max-width blocks so it wins on touch.
+     When the pills overflow, a centered flex container clips its
+     leading edge unrecoverably — anchor left and center via auto
+     margins on the ends instead, which still centers when it fits. */
+  .progress-rail { justify-content: flex-start; }
+  .progress-rail > :first-child { margin-left: auto; }
+  .progress-rail > :last-child { margin-right: auto; }
+  .rail-step {
+    min-height: 42px;
+    gap: 6px;
+    padding: 8px 10px 8px 8px;
+    font-size: 13.5px;
+  }
+  .rail-step-dot {
+    width: 24px;
+    height: 24px;
+  }
+  .rail-step-count {
+    padding-inline: 6px;
+    font-size: 12px;
+  }
+}
+
+/* ── iOS SAFE AREAS ──────────────────────────────────────────
+   With viewport-fit=cover the page runs edge-to-edge under the
+   status bar in the home-screen wrapper; pad top-level chrome by
+   the top inset. env() resolves to 0 everywhere else. */
+.library-header { padding-top: env(safe-area-inset-top); }
+.review-topbar { padding-top: calc(11px + env(safe-area-inset-top)); }
+.lb-header { padding-top: calc(12px + env(safe-area-inset-top)); }
+.editor-header { padding-top: calc(12px + env(safe-area-inset-top)); }
+.settings-header { padding-top: env(safe-area-inset-top); }
+
+/* ── MOBILE CROP TOOL (single screen, no scroll to Apply) ────
+   On phones the crop panel trims to essentials: histogram/rating
+   row, crop-region numbers, and hint text hide; aspect buttons
+   become one horizontally scrollable chip row so Apply stays on
+   screen. Desktop keeps the full right-hand pane. */
+@media (max-width: 700px) {
+  .editor[data-tool="crop"] .editor-panel-head { display: none; }
+  .editor[data-tool="crop"] .editor-panel { min-height: 0; }
+  .editor-crop-controls .editor-crop-readout,
+  .editor-crop-controls p { display: none; }
+  .editor-aspect-grid {
+    grid-template-columns: none;
+    grid-auto-flow: column;
+    grid-auto-columns: minmax(76px, 1fr);
+    overflow-x: auto;
+    overscroll-behavior-inline: contain;
+    scrollbar-width: none;
+  }
+  .editor-aspect-grid::-webkit-scrollbar { display: none; }
+  .editor-aspect { min-height: 44px; }
+  .editor-apply-crop { min-height: 48px; }
+}
+
+/* ── MOBILE PASS RAIL: icon pills, label on active only ──────
+   Four labeled pills overflow a phone width and forced the rail
+   to scroll. On small screens each pass shrinks to icon + count;
+   only the active pass expands to echo its name. */
+@media (max-width: 700px) {
+  .rail-connector { display: none; }
+  .progress-rail { gap: 7px; }
+  .rail-step:not(.active) > span:nth-child(2) { display: none; }
+  .rail-step:not(.active) { padding-inline: 8px; }
 }

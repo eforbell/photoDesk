@@ -147,6 +147,9 @@ const state = {
   immichConnected: false,
 };
 
+// ── Touch support ──────────────────────────────────────────────
+const IS_COARSE_POINTER = window.matchMedia('(pointer: coarse)').matches;
+
 // ── DOM shortcuts ──────────────────────────────────────────────
 const $ = id => document.getElementById(id);
 
@@ -906,20 +909,6 @@ function renderGrid() {
 
   grid.innerHTML = fragments.join('');
 
-  // Attach event listeners
-  grid.querySelectorAll('.grid-item').forEach(el => {
-    const assetId = el.dataset.assetId;
-
-    el.addEventListener('click', () => {
-      state.focusedAssetId = assetId;
-      if (state.mode === 'stack') {
-        toggleStackSelection(assetId, el);
-      } else {
-        openLightbox(assetId);
-      }
-    });
-  });
-
   applyGridFilters();
   updateFocusRing();
   renderProgressRail();
@@ -1035,41 +1024,36 @@ function refreshGridItem(assetId) {
 
   el.replaceWith(newEl);
 
-  // Re-attach click listener
-  newEl.addEventListener('click', () => {
-    state.focusedAssetId = assetId;
-    if (state.mode === 'stack') {
-      toggleStackSelection(assetId, newEl);
-    } else {
-      openLightbox(assetId);
-    }
-  });
-
-  // Re-attach hover action listeners
-  attachHoverActions(newEl);
-
   applyGridFilters();
   renderProgressRail();
 }
 
-function attachHoverActions(el) {
-  el.querySelectorAll('.quick-btn').forEach(btn => {
-    btn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      const assetId = el.dataset.assetId;
-      const action = btn.dataset.action;
-      if (action === 'keep') recordDecision(assetId, 'pick');
-      else if (action === 'reject') recordDecision(assetId, 'reject');
-      else if (action === 'edit') openEditor(assetId);
-      else if (action === 'open') openLightbox(assetId);
-    });
-  });
-}
+// Single delegated handler for tile clicks and quick actions.
+// Grid items are re-rendered in place constantly, so per-element
+// listeners would need to be re-attached (and were historically
+// double-attached, making buttons toggle themselves back off).
+$('photo-grid').addEventListener('click', (e) => {
+  const item = e.target.closest('.grid-item');
+  if (!item) return;
+  const assetId = item.dataset.assetId;
 
-// Attach hover actions after initial render
-function attachAllHoverActions() {
-  document.querySelectorAll('.grid-item').forEach(attachHoverActions);
-}
+  const btn = e.target.closest('.quick-btn');
+  if (btn) {
+    const action = btn.dataset.action;
+    if (action === 'keep') recordDecision(assetId, 'pick');
+    else if (action === 'reject') recordDecision(assetId, 'reject');
+    else if (action === 'edit') openEditor(assetId);
+    else if (action === 'open') openLightbox(assetId);
+    return;
+  }
+
+  state.focusedAssetId = assetId;
+  if (state.mode === 'stack') {
+    toggleStackSelection(assetId, item);
+  } else {
+    openLightbox(assetId);
+  }
+});
 
 // ── Grid focus management ──────────────────────────────────────
 function updateFocusRing() {
@@ -1208,6 +1192,9 @@ function renderLightbox() {
 
   // Keyboard hints
   renderLightboxHints();
+
+  // Touch action bar
+  renderLightboxTouchActions();
 }
 
 function renderLightboxRating(currentRating) {
@@ -1305,6 +1292,153 @@ function renderLightboxHints() {
   hints.innerHTML = items;
 }
 
+// \u2500\u2500 Touch action bar (lightbox, coarse pointers) \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+function clearDecision(assetId) {
+  delete state.decisionMap[assetId];
+  api('DELETE', '/api/decisions', {
+    sessionId: state.currentSession.id,
+    assetId,
+  }).catch(() => {});
+  refreshGridItem(assetId);
+}
+
+function renderLightboxTouchActions() {
+  const bar = $('lb-touch-actions');
+  if (!bar || !IS_COARSE_POINTER) return;
+
+  const buttons = [];
+  if (state.mode === 'cull' || state.mode === 'rate') {
+    buttons.push(`<button class="lb-touch-btn reject" data-touch-action="reject">${icon('x', 19, 2.2)}<span>Reject</span></button>`);
+  }
+  if (state.mode === 'cull') {
+    buttons.push(`<button class="lb-touch-btn" data-touch-action="unset">${icon('reset', 18, 1.9)}<span>Unset</span></button>`);
+    buttons.push(`<button class="lb-touch-btn keep" data-touch-action="keep">${icon('check', 19, 2.2)}<span>Keep</span></button>`);
+  }
+  buttons.push(`<button class="lb-touch-btn" data-touch-action="edit">${icon('sliders', 18, 1.9)}<span>Edit</span></button>`);
+  bar.innerHTML = buttons.join('');
+}
+
+$('lb-touch-actions')?.addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-touch-action]');
+  if (!btn) return;
+  const visible = getVisibleAssets();
+  const assetId = visible[state.lightboxIndex];
+  if (!assetId) return;
+
+  switch (btn.dataset.touchAction) {
+    case 'keep':
+      recordDecision(assetId, 'pick');
+      lbNavigate(1);
+      break;
+    case 'reject':
+      recordDecision(assetId, 'reject');
+      lbNavigate(1);
+      break;
+    case 'unset':
+      clearDecision(assetId);
+      renderLightbox();
+      break;
+    case 'edit':
+      openEditor(assetId);
+      break;
+  }
+});
+
+// \u2500\u2500 Touch gestures (lightbox, coarse pointers) \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+// Swipe up = keep, swipe down = reject, swipe left/right = navigate,
+// double-tap = open editor. Native scrolling/zoom on the stage is
+// suppressed via `touch-action: none` in the coarse-pointer CSS.
+function setupLightboxGestures() {
+  const stage = document.querySelector('.lb-stage');
+  const wrap = document.querySelector('.lb-image-wrap');
+  if (!stage || !wrap) return;
+
+  const SWIPE_THRESHOLD = 64;
+  const AXIS_LOCK = 12;
+  const DOUBLE_TAP_MS = 320;
+  let gesture = null;
+  let lastTapAt = 0;
+
+  function resetVisuals() {
+    wrap.style.transition = '';
+    wrap.style.transform = '';
+    $('lb-flash').className = 'lb-flash';
+  }
+
+  stage.addEventListener('touchstart', (e) => {
+    if (e.touches.length !== 1 || e.target.closest('button')) {
+      gesture = null;
+      return;
+    }
+    const t = e.touches[0];
+    gesture = { x: t.clientX, y: t.clientY, dx: 0, dy: 0, axis: null };
+  }, { passive: true });
+
+  stage.addEventListener('touchmove', (e) => {
+    if (!gesture) return;
+    const t = e.touches[0];
+    gesture.dx = t.clientX - gesture.x;
+    gesture.dy = t.clientY - gesture.y;
+    if (!gesture.axis && (Math.abs(gesture.dx) > AXIS_LOCK || Math.abs(gesture.dy) > AXIS_LOCK)) {
+      gesture.axis = Math.abs(gesture.dx) > Math.abs(gesture.dy) ? 'x' : 'y';
+      wrap.style.transition = 'none';
+    }
+    if (!gesture.axis) return;
+    if (gesture.axis === 'x') {
+      wrap.style.transform = `translateX(${gesture.dx * 0.55}px)`;
+    } else {
+      wrap.style.transform = `translateY(${gesture.dy * 0.55}px)`;
+      const flash = $('lb-flash');
+      if (gesture.dy <= -SWIPE_THRESHOLD) flash.className = 'lb-flash pick';
+      else if (gesture.dy >= SWIPE_THRESHOLD) flash.className = 'lb-flash reject';
+      else flash.className = 'lb-flash';
+    }
+  }, { passive: true });
+
+  stage.addEventListener('touchend', () => {
+    if (!gesture) return;
+    const { dx, dy, axis } = gesture;
+    gesture = null;
+    resetVisuals();
+
+    if (!axis) {
+      // Plain tap \u2014 detect double-tap to open the editor
+      const now = Date.now();
+      if (now - lastTapAt < DOUBLE_TAP_MS) {
+        lastTapAt = 0;
+        const visible = getVisibleAssets();
+        const assetId = visible[state.lightboxIndex];
+        if (assetId) openEditor(assetId);
+      } else {
+        lastTapAt = now;
+      }
+      return;
+    }
+
+    const visible = getVisibleAssets();
+    const assetId = visible[state.lightboxIndex];
+    if (axis === 'x') {
+      if (dx <= -SWIPE_THRESHOLD) lbNavigate(1);
+      else if (dx >= SWIPE_THRESHOLD) lbNavigate(-1);
+    } else if (assetId && (state.mode === 'cull' || state.mode === 'rate')) {
+      if (dy <= -SWIPE_THRESHOLD) {
+        recordDecision(assetId, 'pick');
+        lbNavigate(1);
+      } else if (dy >= SWIPE_THRESHOLD) {
+        recordDecision(assetId, 'reject');
+        lbNavigate(1);
+      }
+    }
+  });
+
+  stage.addEventListener('touchcancel', () => {
+    gesture = null;
+    resetVisuals();
+  });
+}
+
+if (IS_COARSE_POINTER) setupLightboxGestures();
+
 function shouldShowAsset(assetId) {
   if (state.hideRejects && state.decisionMap[assetId] === 'reject') return false;
   if (state.filterShow === 'picked' && state.decisionMap[assetId] !== 'pick') return false;
@@ -1397,6 +1531,11 @@ async function recordRating(assetId, rating) {
       assetId,
     }).catch(err => console.warn('Rating delete failed:', err));
   } else {
+    // A starred photo is implicitly a keeper: rating marks it Pick
+    // (clearing the rating later leaves the Pick in place).
+    if (state.decisionMap[assetId] !== 'pick') {
+      recordDecision(assetId, 'pick');
+    }
     state.ratingMap[assetId] = rating;
     api('POST', '/api/ratings', {
       sessionId: state.currentSession.id,
@@ -1946,6 +2085,7 @@ function renderEditor() {
     updateEditorPreview();
   };
   editorImage.src = `/api/proxy/thumbnail/${assetId}`;
+  $('editor').dataset.tool = state.editorTool;
   document.querySelectorAll('.editor-tool').forEach(button => {
     button.classList.toggle('active', button.dataset.editorTool === state.editorTool);
   });
@@ -2229,7 +2369,7 @@ function showSummary() {
 
   // Reset commit state
   $('commit-log').innerHTML = '';
-  $('commit-confirmation').classList.add('hidden');
+  $('commit-modal').classList.add('hidden');
   $('summary-actions').classList.remove('hidden');
   if (state.currentSession._committed) {
     $('commit-options').style.display = 'none';
@@ -2248,7 +2388,7 @@ function showSummary() {
 }
 
 $('back-to-review').addEventListener('click', () => {
-  $('commit-confirmation').classList.add('hidden');
+  $('commit-modal').classList.add('hidden');
   showScreen('review');
 });
 
@@ -2261,7 +2401,6 @@ function selectedCommitOptions() {
   };
 }
 
-let pendingCommitOptions = null;
 let commitRequestInFlight = false;
 
 function setCommitOptionControlsDisabled(disabled) {
@@ -2274,149 +2413,122 @@ function setCommitOptionControlsDisabled(disabled) {
   $('opt-upload-edits').disabled = disabled || !hasEdits;
 }
 
-function closeCommitConfirmation() {
-  if (commitRequestInFlight) return;
-  pendingCommitOptions = null;
-  $('commit-confirmation').classList.add('hidden');
-  $('summary-actions').classList.remove('hidden');
-  setCommitOptionControlsDisabled(false);
-  $('commit-btn').disabled = false;
-  $('commit-btn').innerHTML = `Commit to Immich ${icon('arrowR', 15)}`;
+function showCommitModal(html) {
+  $('commit-modal-body').innerHTML = html;
+  $('commit-modal').classList.remove('hidden');
 }
 
-function showCommitConfirmation(preview, options) {
-  pendingCommitOptions = { ...options };
-  setCommitOptionControlsDisabled(true);
-  const selectedSteps = preview.steps.filter(step => step.selected);
-  $('commit-confirm-steps').innerHTML = selectedSteps.length
-    ? selectedSteps.map(step => {
-      const pending = `${step.pending} pending`;
-      const applied = step.alreadyApplied > 0
-        ? ` · ${step.alreadyApplied} already applied`
-        : '';
-      return `
-        <div class="commit-confirm-step">
-          <span>${escHtml(step.label)}</span>
-          <strong>${escHtml(pending + applied)}</strong>
-        </div>
-      `;
-    }).join('')
-    : `
-      <div class="commit-confirm-step">
-        <span>Immich changes</span>
-        <strong>None selected</strong>
-      </div>
-    `;
-  const warning = $('commit-confirm-warning');
-  warning.textContent = preview.warnings.join(' ');
-  warning.classList.toggle('hidden', preview.warnings.length === 0);
-  $('commit-confirm-note').textContent = preview.pendingActions > 0
-    ? 'PhotoDesk records each successful action. If a later action fails, Retry sends only unfinished work.'
-    : 'No new Immich operations are pending. Confirming will mark this review session processed.';
-  if (preview.steps.some(step => step.id === 'edits' && step.selected && step.recheckedAtCommit)) {
-    $('commit-confirm-note').textContent += ' Uploaded edits are rechecked against Immich when the commit starts.';
-  }
-  $('commit-confirm-apply').textContent = preview.pendingActions > 0
-    ? `Confirm ${preview.pendingActions} ${preview.pendingActions === 1 ? 'action' : 'actions'}`
-    : 'Mark reviewed';
-  $('commit-confirmation').classList.remove('hidden');
-  $('summary-actions').classList.add('hidden');
-  $('commit-confirm-apply').focus();
+function hideCommitModal() {
+  if (commitRequestInFlight) return;
+  $('commit-modal').classList.add('hidden');
 }
 
 async function executeCommit(options) {
   if (commitRequestInFlight) return;
   commitRequestInFlight = true;
-  $('commit-confirm-apply').disabled = true;
-  $('commit-confirm-cancel').disabled = true;
-  pendingCommitOptions = null;
-  $('commit-confirmation').classList.add('hidden');
-  $('summary-actions').classList.remove('hidden');
+  setCommitOptionControlsDisabled(true);
   $('commit-btn').disabled = true;
-  $('commit-btn').innerHTML = `<span class="spinner" style="width:15px;height:15px;border-width:2px;display:inline-block;vertical-align:middle;margin-right:6px;"></span> Committing\u2026`;
+  showCommitModal(`
+    <div class="commit-modal-wait">
+      <span class="spinner"></span>
+      <h3>Committing to Immich\u2026</h3>
+      <p class="commit-confirm-note">Each successful action is recorded, so a retry only sends unfinished work.</p>
+    </div>
+  `);
 
-  const logEl = $('commit-log');
-  logEl.innerHTML = '<div class="commit-log" id="commit-log-inner"></div>';
-  const logInner = $('commit-log-inner');
-
-  // Hide options
-  $('commit-options').style.display = 'none';
-
-  function addLogLine(msg) {
-    logInner.innerHTML += `<div class="commit-log-line">${icon('check', 14, 2.4)} ${escHtml(msg)}</div>`;
-  }
-
+  let html;
   try {
     const result = await api('POST', `/api/sessions/${state.currentSession.id}/commit`, {
       ...options,
     });
 
+    const lines = [];
     for (const action of result.steps || []) {
       if (!action.selected) continue;
       if (action.succeeded > 0) {
-        addLogLine(`${action.label}: ${action.succeeded} completed`);
+        lines.push(`<div class="commit-log-line">${icon('check', 14, 2.4)} ${escHtml(action.label)}: ${action.succeeded} completed</div>`);
       }
       if (action.alreadyApplied > 0) {
-        logInner.innerHTML += `<div class="commit-log-line skipped">${icon('check', 14, 2)} ${escHtml(action.label)}: ${action.alreadyApplied} already applied, skipped</div>`;
+        lines.push(`<div class="commit-log-line skipped">${icon('check', 14, 2)} ${escHtml(action.label)}: ${action.alreadyApplied} already applied, skipped</div>`);
       }
       for (const error of action.errors || []) {
-        logInner.innerHTML += `<div class="commit-log-line failed">${icon('x', 14, 2.4)} ${escHtml(error)}</div>`;
+        lines.push(`<div class="commit-log-line failed">${icon('x', 14, 2.4)} ${escHtml(error)}</div>`);
       }
     }
-    if (result.steps?.every(action => !action.selected || (
-      action.succeeded === 0 && action.alreadyApplied === 0 && action.errors.length === 0
-    ))) {
-      addLogLine('No Immich changes selected');
+    if (!lines.length) {
+      lines.push(`<div class="commit-log-line skipped">No Immich changes selected</div>`);
     }
 
     if (result.committed) {
-      logInner.innerHTML += `<div class="commit-log-done">Done. Immich is up to date.</div>`;
-      $('commit-options').style.display = 'none';
       state.currentSession._committed = true;
+      $('commit-options').style.display = 'none';
       $('commit-btn').disabled = false;
       $('commit-btn').innerHTML = `Done`;
       $('commit-btn').onclick = () => { showScreen('home'); loadLibrary(); };
+      html = `
+        <div class="commit-modal-result">
+          <div class="commit-modal-badge">${icon('check', 28, 2.6)}</div>
+          <h3>Committed</h3>
+          <div class="commit-modal-lines">${lines.join('')}</div>
+          <div class="commit-confirm-actions">
+            <button class="btn btn-primary" id="commit-modal-done">Back to library ${icon('arrowR', 15)}</button>
+          </div>
+        </div>
+      `;
     } else {
-      logInner.innerHTML += '<div class="commit-log-line" style="color: var(--reject)">Commit incomplete. Fix the errors above and retry.</div>';
-      $('commit-options').style.display = '';
-      setCommitOptionControlsDisabled(false);
       $('commit-btn').disabled = false;
       $('commit-btn').innerHTML = `Retry ${icon('arrowR', 15)}`;
+      html = `
+        <div class="commit-modal-result">
+          <div class="commit-modal-badge failed">${icon('x', 28, 2.6)}</div>
+          <h3>Commit incomplete</h3>
+          <div class="commit-modal-lines">${lines.join('')}</div>
+          <p class="commit-confirm-note">Only unfinished work is sent again on retry \u2014 everything marked done above stays done.</p>
+          <div class="commit-confirm-actions">
+            <button class="btn btn-ghost" id="commit-modal-close">Close</button>
+          </div>
+        </div>
+      `;
     }
-
   } catch (err) {
-    logInner.innerHTML += `<div class="commit-log-line" style="color: var(--reject)">${icon('x', 14, 2.4)} Commit failed: ${escHtml(err.message)}</div>`;
-    setCommitOptionControlsDisabled(false);
     $('commit-btn').disabled = false;
     $('commit-btn').innerHTML = `Retry ${icon('arrowR', 15)}`;
+    html = `
+      <div class="commit-modal-result">
+        <div class="commit-modal-badge failed">${icon('x', 28, 2.6)}</div>
+        <h3>Commit failed</h3>
+        <p class="commit-confirm-note">${escHtml(err.message)}</p>
+        <div class="commit-confirm-actions">
+          <button class="btn btn-ghost" id="commit-modal-close">Close</button>
+        </div>
+      </div>
+    `;
   } finally {
     commitRequestInFlight = false;
-    $('commit-confirm-apply').disabled = false;
-    $('commit-confirm-cancel').disabled = false;
+    setCommitOptionControlsDisabled(false);
   }
+
+  showCommitModal(html);
+  $('commit-modal-done')?.addEventListener('click', () => {
+    hideCommitModal();
+    showScreen('home');
+    loadLibrary();
+  });
+  $('commit-modal-close')?.addEventListener('click', hideCommitModal);
 }
 
-$('commit-btn').addEventListener('click', async () => {
+$('commit-btn').addEventListener('click', () => {
   if (state.currentSession._committed) return;
-  const options = selectedCommitOptions();
-  $('commit-btn').disabled = true;
-  $('commit-btn').innerHTML = `<span class="spinner" style="width:15px;height:15px;border-width:2px;display:inline-block;vertical-align:middle;margin-right:6px;"></span> Checking\u2026`;
-  try {
-    const preview = await api(
-      'POST',
-      `/api/sessions/${state.currentSession.id}/commit?dryRun=true`,
-      options
-    );
-    showCommitConfirmation(preview, options);
-  } catch (err) {
-    $('commit-log').innerHTML = `<div class="commit-log"><div class="commit-log-line failed">${icon('x', 14, 2.4)} Preview failed: ${escHtml(err.message)}</div></div>`;
-    closeCommitConfirmation();
-  }
+  executeCommit(selectedCommitOptions());
 });
 
-$('commit-confirm-cancel').addEventListener('click', closeCommitConfirmation);
-$('commit-confirm-apply').addEventListener('click', () => {
-  executeCommit(pendingCommitOptions || selectedCommitOptions());
+$('commit-modal').addEventListener('click', (e) => {
+  if (e.target === e.currentTarget) hideCommitModal();
+});
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && !$('commit-modal').classList.contains('hidden')) {
+    hideCommitModal();
+  }
 });
 
 // ── Utilities ──────────────────────────────────────────────────
@@ -2434,21 +2546,5 @@ function fmtDate(isoStr) {
   return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
 }
 
-// ── Grid render post-processing (attach hover actions) ─────────
-const originalRenderGrid = renderGrid;
-const _renderGrid = renderGrid;
-
-// Use MutationObserver to attach hover actions after DOM update
-const gridObserver = new MutationObserver(() => {
-  attachAllHoverActions();
-});
-
 // ── Init ───────────────────────────────────────────────────────
-document.addEventListener('DOMContentLoaded', () => {
-  const grid = $('photo-grid');
-  if (grid) {
-    gridObserver.observe(grid, { childList: true, subtree: true });
-  }
-});
-
 loadLibrary();
