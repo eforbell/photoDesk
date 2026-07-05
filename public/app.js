@@ -909,20 +909,6 @@ function renderGrid() {
 
   grid.innerHTML = fragments.join('');
 
-  // Attach event listeners
-  grid.querySelectorAll('.grid-item').forEach(el => {
-    const assetId = el.dataset.assetId;
-
-    el.addEventListener('click', () => {
-      state.focusedAssetId = assetId;
-      if (state.mode === 'stack') {
-        toggleStackSelection(assetId, el);
-      } else {
-        openLightbox(assetId);
-      }
-    });
-  });
-
   applyGridFilters();
   updateFocusRing();
   renderProgressRail();
@@ -1038,41 +1024,36 @@ function refreshGridItem(assetId) {
 
   el.replaceWith(newEl);
 
-  // Re-attach click listener
-  newEl.addEventListener('click', () => {
-    state.focusedAssetId = assetId;
-    if (state.mode === 'stack') {
-      toggleStackSelection(assetId, newEl);
-    } else {
-      openLightbox(assetId);
-    }
-  });
-
-  // Re-attach hover action listeners
-  attachHoverActions(newEl);
-
   applyGridFilters();
   renderProgressRail();
 }
 
-function attachHoverActions(el) {
-  el.querySelectorAll('.quick-btn').forEach(btn => {
-    btn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      const assetId = el.dataset.assetId;
-      const action = btn.dataset.action;
-      if (action === 'keep') recordDecision(assetId, 'pick');
-      else if (action === 'reject') recordDecision(assetId, 'reject');
-      else if (action === 'edit') openEditor(assetId);
-      else if (action === 'open') openLightbox(assetId);
-    });
-  });
-}
+// Single delegated handler for tile clicks and quick actions.
+// Grid items are re-rendered in place constantly, so per-element
+// listeners would need to be re-attached (and were historically
+// double-attached, making buttons toggle themselves back off).
+$('photo-grid').addEventListener('click', (e) => {
+  const item = e.target.closest('.grid-item');
+  if (!item) return;
+  const assetId = item.dataset.assetId;
 
-// Attach hover actions after initial render
-function attachAllHoverActions() {
-  document.querySelectorAll('.grid-item').forEach(attachHoverActions);
-}
+  const btn = e.target.closest('.quick-btn');
+  if (btn) {
+    const action = btn.dataset.action;
+    if (action === 'keep') recordDecision(assetId, 'pick');
+    else if (action === 'reject') recordDecision(assetId, 'reject');
+    else if (action === 'edit') openEditor(assetId);
+    else if (action === 'open') openLightbox(assetId);
+    return;
+  }
+
+  state.focusedAssetId = assetId;
+  if (state.mode === 'stack') {
+    toggleStackSelection(assetId, item);
+  } else {
+    openLightbox(assetId);
+  }
+});
 
 // ── Grid focus management ──────────────────────────────────────
 function updateFocusRing() {
@@ -2560,21 +2541,5 @@ function fmtDate(isoStr) {
   return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
 }
 
-// ── Grid render post-processing (attach hover actions) ─────────
-const originalRenderGrid = renderGrid;
-const _renderGrid = renderGrid;
-
-// Use MutationObserver to attach hover actions after DOM update
-const gridObserver = new MutationObserver(() => {
-  attachAllHoverActions();
-});
-
 // ── Init ───────────────────────────────────────────────────────
-document.addEventListener('DOMContentLoaded', () => {
-  const grid = $('photo-grid');
-  if (grid) {
-    gridObserver.observe(grid, { childList: true, subtree: true });
-  }
-});
-
 loadLibrary();
