@@ -147,6 +147,9 @@ const state = {
   immichConnected: false,
 };
 
+// ── Touch support ──────────────────────────────────────────────
+const IS_COARSE_POINTER = window.matchMedia('(pointer: coarse)').matches;
+
 // ── DOM shortcuts ──────────────────────────────────────────────
 const $ = id => document.getElementById(id);
 
@@ -1208,6 +1211,9 @@ function renderLightbox() {
 
   // Keyboard hints
   renderLightboxHints();
+
+  // Touch action bar
+  renderLightboxTouchActions();
 }
 
 function renderLightboxRating(currentRating) {
@@ -1304,6 +1310,153 @@ function renderLightboxHints() {
   items += `${legend('\u2190 \u2192', 'Navigate')}${legend('\u21B5', 'Next scene')}${legend('E', 'Edit')}${legend('Esc', 'Close')}`;
   hints.innerHTML = items;
 }
+
+// \u2500\u2500 Touch action bar (lightbox, coarse pointers) \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+function clearDecision(assetId) {
+  delete state.decisionMap[assetId];
+  api('DELETE', '/api/decisions', {
+    sessionId: state.currentSession.id,
+    assetId,
+  }).catch(() => {});
+  refreshGridItem(assetId);
+}
+
+function renderLightboxTouchActions() {
+  const bar = $('lb-touch-actions');
+  if (!bar || !IS_COARSE_POINTER) return;
+
+  const buttons = [];
+  if (state.mode === 'cull' || state.mode === 'rate') {
+    buttons.push(`<button class="lb-touch-btn reject" data-touch-action="reject">${icon('x', 19, 2.2)}<span>Reject</span></button>`);
+  }
+  if (state.mode === 'cull') {
+    buttons.push(`<button class="lb-touch-btn" data-touch-action="unset">${icon('reset', 18, 1.9)}<span>Unset</span></button>`);
+    buttons.push(`<button class="lb-touch-btn keep" data-touch-action="keep">${icon('check', 19, 2.2)}<span>Keep</span></button>`);
+  }
+  buttons.push(`<button class="lb-touch-btn" data-touch-action="edit">${icon('sliders', 18, 1.9)}<span>Edit</span></button>`);
+  bar.innerHTML = buttons.join('');
+}
+
+$('lb-touch-actions')?.addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-touch-action]');
+  if (!btn) return;
+  const visible = getVisibleAssets();
+  const assetId = visible[state.lightboxIndex];
+  if (!assetId) return;
+
+  switch (btn.dataset.touchAction) {
+    case 'keep':
+      recordDecision(assetId, 'pick');
+      lbNavigate(1);
+      break;
+    case 'reject':
+      recordDecision(assetId, 'reject');
+      lbNavigate(1);
+      break;
+    case 'unset':
+      clearDecision(assetId);
+      renderLightbox();
+      break;
+    case 'edit':
+      openEditor(assetId);
+      break;
+  }
+});
+
+// \u2500\u2500 Touch gestures (lightbox, coarse pointers) \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+// Swipe up = keep, swipe down = reject, swipe left/right = navigate,
+// double-tap = open editor. Native scrolling/zoom on the stage is
+// suppressed via `touch-action: none` in the coarse-pointer CSS.
+function setupLightboxGestures() {
+  const stage = document.querySelector('.lb-stage');
+  const wrap = document.querySelector('.lb-image-wrap');
+  if (!stage || !wrap) return;
+
+  const SWIPE_THRESHOLD = 64;
+  const AXIS_LOCK = 12;
+  const DOUBLE_TAP_MS = 320;
+  let gesture = null;
+  let lastTapAt = 0;
+
+  function resetVisuals() {
+    wrap.style.transition = '';
+    wrap.style.transform = '';
+    $('lb-flash').className = 'lb-flash';
+  }
+
+  stage.addEventListener('touchstart', (e) => {
+    if (e.touches.length !== 1 || e.target.closest('button')) {
+      gesture = null;
+      return;
+    }
+    const t = e.touches[0];
+    gesture = { x: t.clientX, y: t.clientY, dx: 0, dy: 0, axis: null };
+  }, { passive: true });
+
+  stage.addEventListener('touchmove', (e) => {
+    if (!gesture) return;
+    const t = e.touches[0];
+    gesture.dx = t.clientX - gesture.x;
+    gesture.dy = t.clientY - gesture.y;
+    if (!gesture.axis && (Math.abs(gesture.dx) > AXIS_LOCK || Math.abs(gesture.dy) > AXIS_LOCK)) {
+      gesture.axis = Math.abs(gesture.dx) > Math.abs(gesture.dy) ? 'x' : 'y';
+      wrap.style.transition = 'none';
+    }
+    if (!gesture.axis) return;
+    if (gesture.axis === 'x') {
+      wrap.style.transform = `translateX(${gesture.dx * 0.55}px)`;
+    } else {
+      wrap.style.transform = `translateY(${gesture.dy * 0.55}px)`;
+      const flash = $('lb-flash');
+      if (gesture.dy <= -SWIPE_THRESHOLD) flash.className = 'lb-flash pick';
+      else if (gesture.dy >= SWIPE_THRESHOLD) flash.className = 'lb-flash reject';
+      else flash.className = 'lb-flash';
+    }
+  }, { passive: true });
+
+  stage.addEventListener('touchend', () => {
+    if (!gesture) return;
+    const { dx, dy, axis } = gesture;
+    gesture = null;
+    resetVisuals();
+
+    if (!axis) {
+      // Plain tap \u2014 detect double-tap to open the editor
+      const now = Date.now();
+      if (now - lastTapAt < DOUBLE_TAP_MS) {
+        lastTapAt = 0;
+        const visible = getVisibleAssets();
+        const assetId = visible[state.lightboxIndex];
+        if (assetId) openEditor(assetId);
+      } else {
+        lastTapAt = now;
+      }
+      return;
+    }
+
+    const visible = getVisibleAssets();
+    const assetId = visible[state.lightboxIndex];
+    if (axis === 'x') {
+      if (dx <= -SWIPE_THRESHOLD) lbNavigate(1);
+      else if (dx >= SWIPE_THRESHOLD) lbNavigate(-1);
+    } else if (assetId && (state.mode === 'cull' || state.mode === 'rate')) {
+      if (dy <= -SWIPE_THRESHOLD) {
+        recordDecision(assetId, 'pick');
+        lbNavigate(1);
+      } else if (dy >= SWIPE_THRESHOLD) {
+        recordDecision(assetId, 'reject');
+        lbNavigate(1);
+      }
+    }
+  });
+
+  stage.addEventListener('touchcancel', () => {
+    gesture = null;
+    resetVisuals();
+  });
+}
+
+if (IS_COARSE_POINTER) setupLightboxGestures();
 
 function shouldShowAsset(assetId) {
   if (state.hideRejects && state.decisionMap[assetId] === 'reject') return false;

@@ -2405,3 +2405,70 @@ input.suggestion-name:focus {
   padding: 80px 0;
   font-size: 14px;
 }
+
+/* ── TOUCH DEVICES (coarse pointer) ──────────────────────────
+   iOS/tablet ergonomics. Everything in here is additive and
+   gated on pointer:coarse so desktop behavior is unchanged. */
+.lb-touch-actions { display: none; }
+
+@media (pointer: coarse) {
+  /* Grid quick actions: always visible and thumb-sized
+     (hover-gated reveals never fire reliably on touch) */
+  .grid-item-hover { opacity: 1; pointer-events: auto; }
+  .grid-hover-actions {
+    padding: 30px 8px 8px;
+    gap: 8px;
+  }
+  .quick-btn {
+    width: 40px;
+    height: 40px;
+    border-radius: 9px;
+  }
+  .quick-btn svg { width: 18px; height: 18px; }
+
+  /* Keyboard legends are meaningless without a keyboard */
+  .keyboard-legend { display: none; }
+  .lb-hints { display: none; }
+  .lb-edit-button .kbd { display: none; }
+
+  /* Lightbox: swipes navigate, so drop the floating arrows;
+     touch-action:none frees the stage for gesture handling */
+  .lb-nav { display: none; }
+  .lb-stage { touch-action: none; }
+  .lb-image-wrap { transition: transform 0.18s ease; }
+
+  /* Touch action bar */
+  .lb-touch-actions {
+    flex: none;
+    display: grid;
+    grid-auto-flow: column;
+    grid-auto-columns: 1fr;
+    gap: 8px;
+    padding: 8px 10px calc(10px + env(safe-area-inset-bottom));
+    background: var(--bg-deep);
+    border-top: 1px solid var(--border-soft);
+  }
+  .lb-touch-btn {
+    min-height: 48px;
+    border-radius: 10px;
+    border: 1px solid var(--border-soft);
+    background: var(--panel);
+    color: var(--text);
+    font-family: inherit;
+    font-size: 13.5px;
+    font-weight: 600;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 7px;
+    cursor: pointer;
+  }
+  .lb-touch-btn:active { background: var(--panel-2); }
+  .lb-touch-btn.keep { color: var(--keep); border-color: color-mix(in oklab, var(--keep) 40%, transparent); }
+  .lb-touch-btn.reject { color: var(--reject); border-color: color-mix(in oklab, var(--reject) 40%, transparent); }
+
+  /* Bigger rating stars and filmstrip targets */
+  .lb-star { padding: 6px; }
+  .lb-star svg { width: 24px; height: 24px; }
+  .filmstrip-thumb { height: 72px; }
+}
