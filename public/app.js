@@ -2099,6 +2099,7 @@ function renderEditor() {
     updateEditorPreview();
   };
   editorImage.src = `/api/proxy/thumbnail/${assetId}`;
+  $('editor').dataset.tool = state.editorTool;
   document.querySelectorAll('.editor-tool').forEach(button => {
     button.classList.toggle('active', button.dataset.editorTool === state.editorTool);
   });

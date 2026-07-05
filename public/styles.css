@@ -2557,3 +2557,26 @@ input.suggestion-name:focus {
 .lb-header { padding-top: calc(12px + env(safe-area-inset-top)); }
 .editor-header { padding-top: calc(12px + env(safe-area-inset-top)); }
 .settings-header { padding-top: env(safe-area-inset-top); }
+
+/* ── MOBILE CROP TOOL (single screen, no scroll to Apply) ────
+   On phones the crop panel trims to essentials: histogram/rating
+   row, crop-region numbers, and hint text hide; aspect buttons
+   become one horizontally scrollable chip row so Apply stays on
+   screen. Desktop keeps the full right-hand pane. */
+@media (max-width: 700px) {
+  .editor[data-tool="crop"] .editor-panel-head { display: none; }
+  .editor[data-tool="crop"] .editor-panel { min-height: 0; }
+  .editor-crop-controls .editor-crop-readout,
+  .editor-crop-controls p { display: none; }
+  .editor-aspect-grid {
+    grid-template-columns: none;
+    grid-auto-flow: column;
+    grid-auto-columns: minmax(76px, 1fr);
+    overflow-x: auto;
+    overscroll-behavior-inline: contain;
+    scrollbar-width: none;
+  }
+  .editor-aspect-grid::-webkit-scrollbar { display: none; }
+  .editor-aspect { min-height: 44px; }
+  .editor-apply-crop { min-height: 48px; }
+}
