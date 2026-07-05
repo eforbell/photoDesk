@@ -2580,3 +2580,14 @@ input.suggestion-name:focus {
   .editor-aspect { min-height: 44px; }
   .editor-apply-crop { min-height: 48px; }
 }
+
+/* ── MOBILE PASS RAIL: icon pills, label on active only ──────
+   Four labeled pills overflow a phone width and forced the rail
+   to scroll. On small screens each pass shrinks to icon + count;
+   only the active pass expands to echo its name. */
+@media (max-width: 700px) {
+  .rail-connector { display: none; }
+  .progress-rail { gap: 7px; }
+  .rail-step:not(.active) > span:nth-child(2) { display: none; }
+  .rail-step:not(.active) { padding-inline: 8px; }
+}
