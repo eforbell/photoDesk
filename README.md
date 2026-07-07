@@ -195,6 +195,66 @@ serializes HEIC decodes, limits source files to 50 MiB and decoded TIFFs to
 client disconnects. Both limits are enforced while bytes are being downloaded
 or written, rather than only after the operation completes.
 
+
+### Containerized HEIC decoder for iOS 18+ files
+
+If the host `vips` fails on newer Apple HEIC files with an error like
+`Too many auxiliary image references`, keep the OS packages unchanged and run
+a newer decoder stack in Docker. This is the preferred path on Linux Mint
+22.1/Ubuntu Noble, where `libvips42t64` is correctly pinned to 8.15.1 and
+`libheif1` is older than the line that handles these files.
+
+Build the decoder image on the PhotoDesk host:
+
+```bash
+cd /data/apps/photoDesk
+docker build -t photodesk-heic-decoder:trixie -f deploy/heic-decoder/Dockerfile .
+```
+
+Smoke-test the container against the failing HEIC before wiring it into the
+service:
+
+```bash
+docker run --rm --network none \
+  -v "$PWD:/work:ro" \
+  photodesk-heic-decoder:trixie \
+  heifload /work/101493d1-c380-446e-98ab-4b640610ccec.heic /tmp/out.tif --unlimited
+```
+
+For PhotoDesk, use the vips-compatible wrapper. It mounts only the private
+temporary decode directory created by PhotoDesk and forwards the existing
+`vips heifload ... --unlimited` arguments into the container:
+
+```dotenv
+PHOTODESK_HEIC_DECODE=external
+PHOTODESK_HEIC_DECODER_CMD=/data/apps/photoDesk/scripts/photodesk-vips-docker
+PHOTODESK_HEIC_DECODER_IMAGE=photodesk-heic-decoder:trixie
+```
+
+The systemd service user must be able to run Docker. On a single-user home
+server this usually means adding that user to the `docker` group, then logging
+out/in or restarting the service manager session. Treat Docker group access as
+root-equivalent.
+
+Validate before restarting PhotoDesk:
+
+```bash
+cd /data/apps/photoDesk
+PHOTODESK_HEIC_DECODE=external \
+PHOTODESK_HEIC_DECODER_CMD=/data/apps/photoDesk/scripts/photodesk-vips-docker \
+PHOTODESK_HEIC_DECODER_IMAGE=photodesk-heic-decoder:trixie \
+  npm run check:heic
+```
+
+Then rerun the standalone failing-file test through the wrapper:
+
+```bash
+/data/apps/photoDesk/scripts/photodesk-vips-docker \
+  heifload ~/Downloads/101493d1-c380-446e-98ab-4b640610ccec.heic /tmp/photodesk-heic-container-test.tif --unlimited
+```
+
+If both pass, restart PhotoDesk with the updated `.env`.
+
 ## Design and planning
 
 The visual and interaction source of truth is

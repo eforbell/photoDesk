@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+# vips-compatible Docker wrapper for PhotoDesk HEIC external mode.
+#
+# PhotoDesk calls PHOTODESK_HEIC_DECODER_CMD like:
+#   <command> heifload /tmp/photodesk-heic-*/source.heic /tmp/photodesk-heic-*/decoded.tif --unlimited
+# This wrapper preserves that CLI shape while executing vips inside an isolated
+# container with a newer libheif/libvips stack.
+
+set -euo pipefail
+
+IMAGE="${PHOTODESK_HEIC_DECODER_IMAGE:-photodesk-heic-decoder:trixie}"
+RUNTIME="${PHOTODESK_CONTAINER_RUNTIME:-docker}"
+
+if [[ $# -lt 1 ]]; then
+  echo "usage: $0 <vips-args...>" >&2
+  exit 64
+fi
+
+mount_args=()
+if [[ "${1:-}" == "heifload" && $# -ge 3 ]]; then
+  input_path="$2"
+  output_path="$3"
+  input_dir="$(dirname "$input_path")"
+  output_dir="$(dirname "$output_path")"
+
+  if [[ "$input_dir" == "$output_dir" ]]; then
+    mount_args+=(--volume "${input_dir}:${input_dir}:rw")
+  else
+    mount_args+=(--volume "${input_dir}:${input_dir}:ro")
+    mount_args+=(--volume "${output_dir}:${output_dir}:rw")
+  fi
+fi
+
+exec "$RUNTIME" run --rm \
+  --network none \
+  --user "$(id -u):$(id -g)" \
+  --env VIPS_CONCURRENCY="${VIPS_CONCURRENCY:-1}" \
+  --env VIPS_DISC_THRESHOLD="${VIPS_DISC_THRESHOLD:-67108864}" \
+  "${mount_args[@]}" \
+  "$IMAGE" "$@"
