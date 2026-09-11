@@ -108,6 +108,8 @@ IMMICH_URL=http://localhost:2283
 IMMICH_API_KEY=your-api-key-here
 PORT=3400
 TZ=America/New_York
+# Optional: only discover photos captured on or after this local date
+# PHOTODESK_LIBRARY_START_DATE=2024-01-01
 PHOTODESK_EDIT_DIR=/durable/path/to/photodesk-edits
 PHOTODESK_HEIC_DECODE=off
 # PHOTODESK_HEIC_DECODER_CMD=/usr/bin/vips
@@ -121,6 +123,14 @@ npm start
 ```
 
 Open `http://localhost:3400`.
+
+### Discovery floor
+
+Set `PHOTODESK_LIBRARY_START_DATE` to an inclusive `YYYY-MM-DD` date to keep
+older imported assets out of PhotoDesk's library counts, calendar, and
+suggested un-triaged sessions. The cutoff uses the configured `TZ` and does
+not mark assets reviewed or change anything in Immich; older assets remain
+available if you intentionally create a session for their date range.
 
 For development with automatic server restarts:
 
