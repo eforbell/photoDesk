@@ -465,6 +465,7 @@ router.get('/stats', async (req, res) => {
       activeDays: snapshot.activeDays,
       computedAt: snapshot.computedAt,
       timezone: snapshot.timezone,
+      libraryStartDate: config.libraryStartDate,
     });
   } catch (err) {
     console.error('[GET /stats]', err);

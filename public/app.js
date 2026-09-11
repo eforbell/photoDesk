@@ -516,6 +516,12 @@ async function loadLibrary() {
       api('GET', '/api/library/suggestions'),
     ]);
     $('stat-library').textContent = stats.totalLibrary.toLocaleString();
+    $('stat-library-label').textContent = stats.libraryStartDate ? 'In review range' : 'In library';
+    const discoveryFloor = $('library-discovery-floor');
+    discoveryFloor.textContent = stats.libraryStartDate
+      ? `Showing photos captured on or after ${stats.libraryStartDate}.`
+      : '';
+    discoveryFloor.classList.toggle('hidden', !stats.libraryStartDate);
     $('stat-untriaged').textContent = stats.totalUntriaged.toLocaleString();
     $('stat-days').textContent = stats.activeDays.toLocaleString();
     state.libraryDays = density.days;

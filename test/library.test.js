@@ -5,6 +5,7 @@ const {
   clusterSuggestions,
   dateKeyInTimeZone,
   formatDateRange,
+  libraryFetchOptions,
   processedAssetIds,
   rangeSummary,
 } = require('../src/library');
@@ -108,4 +109,25 @@ test('calendar navigation exposes the full library year range', () => {
   assert.deepEqual(monthKeysForYear(days, 2026), [
     '2026-01', '2026-02', '2026-03', '2026-04', '2026-05', '2026-06',
   ]);
+});
+
+test('discovery floor excludes earlier local dates and scopes the snapshot cache', () => {
+  const snapshot = buildSnapshot([
+    asset('before', '2023-12-31T15:00:00Z'),
+    asset('on-cutoff', '2024-01-01T15:00:00Z'),
+  ], new Set(), 'America/New_York', '2024-01-01');
+
+  assert.equal(snapshot.libraryScope, 'owned-from-2024-01-01');
+  assert.equal(snapshot.totalLibrary, 1);
+  assert.equal(snapshot.totalUntriaged, 1);
+  assert.deepEqual(snapshot.days.map(day => day.date), ['2024-01-01']);
+});
+
+
+test('discovery floor is sent to Immich as a local start-of-day query', () => {
+  assert.deepEqual(libraryFetchOptions(), {});
+  assert.deepEqual(
+    libraryFetchOptions('2024-01-01'),
+    { dateFrom: new Date('2024-01-01T00:00:00.000').toISOString() }
+  );
 });

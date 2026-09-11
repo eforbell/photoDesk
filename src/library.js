@@ -40,13 +40,17 @@ function lightweightAsset(asset, timeZone = config.timezone) {
   };
 }
 
-function buildSnapshot(assets, processedIds, timeZone = config.timezone) {
+function libraryScope(libraryStartDate) {
+  return libraryStartDate ? `owned-from-${libraryStartDate}` : 'owned';
+}
+
+function buildSnapshot(assets, processedIds, timeZone = config.timezone, libraryStartDate = config.libraryStartDate) {
   const processed = processedIds instanceof Set ? processedIds : new Set(processedIds);
   const days = new Map();
 
   for (const raw of assets) {
     const asset = lightweightAsset(raw, timeZone);
-    if (!asset) continue;
+    if (!asset || (libraryStartDate && asset.date < libraryStartDate)) continue;
     if (!days.has(asset.date)) days.set(asset.date, []);
     days.get(asset.date).push({
       ...asset,
@@ -67,7 +71,7 @@ function buildSnapshot(assets, processedIds, timeZone = config.timezone) {
   const totalUntriaged = sortedDays.reduce((sum, day) => sum + day.untriagedCount, 0);
 
   return {
-    libraryScope: 'owned',
+    libraryScope: libraryScope(libraryStartDate),
     computedAt: new Date().toISOString(),
     timezone: timeZone,
     totalLibrary,
@@ -167,14 +171,14 @@ function relativeDate(dateKey, now = new Date()) {
   return `${diff} days ago`;
 }
 
-function readCachedSnapshot(db, profileId, refresh = false) {
+function readCachedSnapshot(db, profileId, refresh = false, libraryStartDate = config.libraryStartDate) {
   if (refresh) return null;
   const row = db.prepare('SELECT computed_at, data FROM density_cache WHERE profile_id = ?').get(profileId);
   if (!row) return null;
   const age = Date.now() - Date.parse(row.computed_at);
   if (!Number.isFinite(age) || age > CACHE_TTL_MS) return null;
   const snapshot = JSON.parse(row.data);
-  if (snapshot.libraryScope !== 'owned') return null;
+  if (snapshot.libraryScope !== libraryScope(libraryStartDate)) return null;
   return snapshot;
 }
 
@@ -193,11 +197,18 @@ function processedAssetIds(db, profileId) {
   return new Set(rows.map(row => row.asset_id));
 }
 
+function libraryFetchOptions(libraryStartDate = config.libraryStartDate) {
+  if (!libraryStartDate) return {};
+  return {
+    dateFrom: new Date(`${libraryStartDate}T00:00:00.000`).toISOString(),
+  };
+}
+
 async function getLibrarySnapshot(db, profileId, { refresh = false, credentials } = {}) {
   const cached = readCachedSnapshot(db, profileId, refresh);
   if (cached) return cached;
 
-  const assets = await fetchOwnedAssets({}, credentials);
+  const assets = await fetchOwnedAssets(libraryFetchOptions(), credentials);
   const processedIds = processedAssetIds(db, profileId);
   const snapshot = buildSnapshot(assets, processedIds);
   db.prepare(`
@@ -225,6 +236,8 @@ module.exports = {
   dateKeyInTimeZone,
   formatDateRange,
   getLibrarySnapshot,
+  libraryFetchOptions,
+  libraryScope,
   invalidateLibraryCache,
   processedAssetIds,
   rangeSummary,
