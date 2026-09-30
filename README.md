@@ -95,7 +95,7 @@ Requirements:
   commit
 
 ```bash
-git clone git@github.com:eforbell/photoDesk.git
+git clone https://github.com/eforbell/photoDesk.git
 cd photoDesk
 npm install
 cp .env.example .env

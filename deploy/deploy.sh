@@ -6,7 +6,7 @@
 #   ./deploy/deploy.sh --restore-stash # restore last auto-stashed changes
 # Env:
 #   APP_DIR=/data/apps/photoDesk
-#   REPO_URL=git@github.com:eforbell/photoDesk.git
+#   REPO_URL=https://github.com/eforbell/photoDesk.git
 #   SERVICE_NAME=photodesk
 #   AUTO_STASH=1                       # default; stash local changes before deploy
 #   AUTO_STASH=0                       # fail on local changes instead
@@ -15,7 +15,7 @@
 set -euo pipefail
 
 APP_DIR="${APP_DIR:-/data/apps/photoDesk}"
-REPO_URL="${REPO_URL:-git@github.com:eforbell/photoDesk.git}"
+REPO_URL="${REPO_URL:-https://github.com/eforbell/photoDesk.git}"
 SERVICE="${SERVICE_NAME:-photodesk}"
 BRANCH="${1:-main}"
 REMOTE_BRANCH="${BRANCH#origin/}"
