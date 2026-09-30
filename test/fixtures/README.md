@@ -4,7 +4,9 @@
   deployment capability checks.
 - `heic-probe-rotated.heic` is a synthetic orientation regression fixture.
 - `test.heic` is a real tiled iPhone HEIC contributed for repository use. Its
-  location data was removed before commit. Local inspection shows no GPS or
+  EXIF, MakerNote, and XMP metadata (including capture time and device
+  details) were blanked in place, leaving pixels and tiled container structure
+  unchanged. Local inspection shows no GPS or
   location fields, dimensions 3052x2720, top-left orientation, and an embedded
   ICC profile.
 
