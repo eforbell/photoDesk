@@ -271,3 +271,7 @@ The visual and interaction source of truth is
 [`design/design_handoff_photodesk/README.md`](design/design_handoff_photodesk/README.md).
 Development history, feature PRDs, and durable decisions are under
 [`planning/`](planning/).
+
+## License
+
+[MIT](LICENSE)
